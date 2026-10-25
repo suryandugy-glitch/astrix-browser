@@ -6,11 +6,11 @@
   "author": "Suryandu Ganguly, Gourab Bhaumik, Soumik Barman",
   "license": "MIT",
   "scripts": {
-    "format": "prettier --write .",
-    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "lint": "npm run typecheck",
+    "test": "node --test tests/urlUtils.test.mjs",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "electron-vite build",

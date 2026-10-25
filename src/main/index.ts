@@ -1,10 +1,14 @@
 import { app, BrowserWindow, ipcMain, session, Menu } from 'electron'
 import { join } from 'path'
 import { TabManager } from './tabManager'
+import { StorageService, UserPreferences } from './storageService'
+import { DownloadManager } from './downloadManager'
 import { SearchEngine } from './types'
 
 let mainWindow: BrowserWindow | null = null
 let tabManager: TabManager | null = null
+let storageService: StorageService | null = null
+let downloadManager: DownloadManager | null = null
 
 function setupApplicationMenu(): void {
   const isMac = process.platform === 'darwin'
@@ -19,9 +23,20 @@ function setupApplicationMenu(): void {
           click: () => tabManager?.createTab()
         },
         {
+          label: 'Duplicate Tab',
+          accelerator: 'CmdOrCtrl+Shift+D',
+          click: () => tabManager?.duplicateTab()
+        },
+        {
           label: 'Close Tab',
           accelerator: 'CmdOrCtrl+W',
           click: () => tabManager?.closeTab()
+        },
+        { type: 'separator' },
+        {
+          label: 'Print...',
+          accelerator: 'CmdOrCtrl+P',
+          click: () => tabManager?.printPage()
         },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
@@ -36,7 +51,13 @@ function setupApplicationMenu(): void {
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },
-        { role: 'selectAll' }
+        { role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: 'Find in Page...',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => mainWindow?.webContents.send('find:toggle')
+        }
       ]
     },
     {
@@ -88,6 +109,37 @@ function setupApplicationMenu(): void {
           label: 'Forward',
           accelerator: 'Alt+Right',
           click: () => tabManager?.goForward()
+        },
+        { type: 'separator' },
+        {
+          label: 'Show Full History',
+          accelerator: 'CmdOrCtrl+H',
+          click: () => mainWindow?.webContents.send('history:toggle')
+        }
+      ]
+    },
+    {
+      label: 'Bookmarks',
+      submenu: [
+        {
+          label: 'Bookmark Current Tab',
+          accelerator: 'CmdOrCtrl+D',
+          click: () => mainWindow?.webContents.send('bookmark:toggle-current')
+        },
+        {
+          label: 'Show Bookmarks Bar',
+          accelerator: 'CmdOrCtrl+Shift+B',
+          click: () => {
+            if (storageService && tabManager) {
+              const current = storageService.getPreferences().showBookmarksBar
+              storageService.updatePreferences({ showBookmarksBar: !current })
+              tabManager.updateToolbarHeightFromPreferences()
+              mainWindow?.webContents.send(
+                'preferences:changed',
+                storageService.getPreferences()
+              )
+            }
+          }
         }
       ]
     },
@@ -119,6 +171,9 @@ function setupApplicationMenu(): void {
 }
 
 function createWindow(): void {
+  storageService = new StorageService()
+  downloadManager = new DownloadManager()
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 850,
@@ -136,7 +191,8 @@ function createWindow(): void {
     }
   })
 
-  tabManager = new TabManager(mainWindow)
+  tabManager = new TabManager(mainWindow, storageService)
+  downloadManager.setMainWindow(mainWindow)
 
   // Security: Deny unreviewed permission requests by default
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
@@ -160,71 +216,42 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
     tabManager = null
+    storageService = null
+    downloadManager = null
   })
 }
 
-// Register IPC handlers for tab operations
+// Register all IPC handlers
 function registerIpcHandlers(): void {
-  ipcMain.handle('tab:create', (_event, url?: string) => {
-    return tabManager?.createTab(url)
-  })
-
-  ipcMain.handle('tab:switch', (_event, tabId: string) => {
-    tabManager?.switchTab(tabId)
-  })
-
-  ipcMain.handle('tab:close', (_event, tabId?: string) => {
-    tabManager?.closeTab(tabId)
-  })
-
-  ipcMain.handle('tab:navigate', (_event, tabId: string, input: string) => {
+  // --- Tabs & Navigation ---
+  ipcMain.handle('tab:create', (_event, url?: string) => tabManager?.createTab(url))
+  ipcMain.handle('tab:duplicate', (_event, id?: string) => tabManager?.duplicateTab(id))
+  ipcMain.handle('tab:switch', (_event, tabId: string) => tabManager?.switchTab(tabId))
+  ipcMain.handle('tab:close', (_event, tabId?: string) => tabManager?.closeTab(tabId))
+  ipcMain.handle('tab:close-others', (_event, tabId: string) =>
+    tabManager?.closeOtherTabs(tabId)
+  )
+  ipcMain.handle('tab:navigate', (_event, tabId: string, input: string) =>
     tabManager?.navigate(tabId, input)
-  })
-
-  ipcMain.handle('tab:go-back', (_event, tabId?: string) => {
-    tabManager?.goBack(tabId)
-  })
-
-  ipcMain.handle('tab:go-forward', (_event, tabId?: string) => {
-    tabManager?.goForward(tabId)
-  })
-
-  ipcMain.handle('tab:reload', (_event, tabId?: string) => {
-    tabManager?.reload(tabId)
-  })
-
-  ipcMain.handle('tab:reload-ignore-cache', (_event, tabId?: string) => {
+  )
+  ipcMain.handle('tab:go-back', (_event, tabId?: string) => tabManager?.goBack(tabId))
+  ipcMain.handle('tab:go-forward', (_event, tabId?: string) => tabManager?.goForward(tabId))
+  ipcMain.handle('tab:reload', (_event, tabId?: string) => tabManager?.reload(tabId))
+  ipcMain.handle('tab:reload-ignore-cache', (_event, tabId?: string) =>
     tabManager?.reloadIgnoringCache(tabId)
-  })
-
-  ipcMain.handle('tab:stop', (_event, tabId?: string) => {
-    tabManager?.stop(tabId)
-  })
-
-  ipcMain.handle('tab:zoom-in', (_event, tabId?: string) => {
-    tabManager?.zoomIn(tabId)
-  })
-
-  ipcMain.handle('tab:zoom-out', (_event, tabId?: string) => {
-    tabManager?.zoomOut(tabId)
-  })
-
-  ipcMain.handle('tab:reset-zoom', (_event, tabId?: string) => {
-    tabManager?.resetZoom(tabId)
-  })
-
-  ipcMain.handle('tab:toggle-mute', (_event, tabId?: string) => {
-    tabManager?.toggleMute(tabId)
-  })
-
-  ipcMain.handle('tab:toggle-devtools', (_event, tabId?: string) => {
+  )
+  ipcMain.handle('tab:stop', (_event, tabId?: string) => tabManager?.stop(tabId))
+  ipcMain.handle('tab:zoom-in', (_event, tabId?: string) => tabManager?.zoomIn(tabId))
+  ipcMain.handle('tab:zoom-out', (_event, tabId?: string) => tabManager?.zoomOut(tabId))
+  ipcMain.handle('tab:reset-zoom', (_event, tabId?: string) => tabManager?.resetZoom(tabId))
+  ipcMain.handle('tab:toggle-mute', (_event, tabId?: string) => tabManager?.toggleMute(tabId))
+  ipcMain.handle('tab:toggle-devtools', (_event, tabId?: string) =>
     tabManager?.toggleDevTools(tabId)
-  })
-
-  ipcMain.handle('tab:set-search-engine', (_event, engine: SearchEngine) => {
+  )
+  ipcMain.handle('tab:print', (_event, tabId?: string) => tabManager?.printPage(tabId))
+  ipcMain.handle('tab:set-search-engine', (_event, engine: SearchEngine) =>
     tabManager?.setSearchEngine(engine)
-  })
-
+  )
   ipcMain.handle('tab:get-state', () => {
     return (
       tabManager?.getState() ?? {
@@ -233,6 +260,57 @@ function registerIpcHandlers(): void {
         activeSearchEngine: 'google'
       }
     )
+  })
+
+  // --- Find in Page ---
+  ipcMain.handle(
+    'find:start',
+    (_event, text: string, forward: boolean, findNext: boolean) => {
+      tabManager?.findInPage(text, forward, findNext)
+    }
+  )
+  ipcMain.handle('find:stop', () => {
+    tabManager?.stopFindInPage()
+  })
+
+  // --- Bookmarks ---
+  ipcMain.handle('bookmarks:get', () => storageService?.getBookmarks() ?? [])
+  ipcMain.handle('bookmarks:add', (_event, title: string, url: string, favicon?: string) => {
+    return storageService?.addBookmark(title, url, favicon)
+  })
+  ipcMain.handle('bookmarks:remove', (_event, idOrUrl: string) => {
+    return storageService?.removeBookmark(idOrUrl) ?? false
+  })
+  ipcMain.handle('bookmarks:is-bookmarked', (_event, url: string) => {
+    return storageService?.isBookmarked(url) ?? false
+  })
+
+  // --- History ---
+  ipcMain.handle('history:get', (_event, query?: string) => {
+    return storageService?.getHistory(query) ?? []
+  })
+  ipcMain.handle('history:clear', () => {
+    storageService?.clearHistory()
+  })
+  ipcMain.handle('history:remove', (_event, id: string) => {
+    storageService?.removeHistoryItem(id)
+  })
+
+  // --- Downloads ---
+  ipcMain.handle('downloads:get', () => downloadManager?.getDownloads() ?? [])
+  ipcMain.handle('downloads:cancel', (_event, id: string) => downloadManager?.cancel(id))
+  ipcMain.handle('downloads:pause', (_event, id: string) => downloadManager?.pause(id))
+  ipcMain.handle('downloads:resume', (_event, id: string) => downloadManager?.resume(id))
+  ipcMain.handle('downloads:open-folder', (_event, id: string) =>
+    downloadManager?.openInFolder(id)
+  )
+
+  // --- Preferences ---
+  ipcMain.handle('preferences:get', () => storageService?.getPreferences())
+  ipcMain.handle('preferences:update', (_event, partial: Partial<UserPreferences>) => {
+    const updated = storageService?.updatePreferences(partial)
+    tabManager?.updateToolbarHeightFromPreferences()
+    return updated
   })
 }
 

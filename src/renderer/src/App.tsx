@@ -1,8 +1,24 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { Tab, TabState } from '../../main/types'
+import { Bookmark, UserPreferences } from '../../main/storageService'
+import { DownloadRecord } from '../../main/downloadManager'
+import { FindResult } from '../../preload/index.d'
 import { TabBar } from './components/TabBar'
 import { Toolbar } from './components/Toolbar'
+import { BookmarksBar } from './components/BookmarksBar'
+import { FindInPage } from './components/FindInPage'
+import { HistoryModal } from './components/HistoryModal'
+import { DownloadsModal } from './components/DownloadsModal'
+import { SettingsModal } from './components/SettingsModal'
+import { SiteInfoModal } from './components/SiteInfoModal'
 import { NewTabPage } from './components/NewTabPage'
+
+const DEFAULT_PREFERENCES: UserPreferences = {
+  searchEngine: 'google',
+  showBookmarksBar: true,
+  homepage: 'astrix://newtab',
+  theme: 'dark'
+}
 
 export const App: React.FC = () => {
   const [tabState, setTabState] = useState<TabState>({
@@ -11,24 +27,70 @@ export const App: React.FC = () => {
     activeSearchEngine: 'google'
   })
 
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
+  const [downloads, setDownloads] = useState<DownloadRecord[]>([])
+  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES)
+
+  // Modals & Panels
+  const [showHistory, setShowHistory] = useState(false)
+  const [showDownloads, setShowDownloads] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [showSiteInfo, setShowSiteInfo] = useState(false)
+  const [showFind, setShowFind] = useState(false)
+  const [findResult, setFindResult] = useState<FindResult>({
+    activeMatchOrdinal: 0,
+    matches: 0,
+    finalUpdate: true
+  })
+
+  // Initial data loading
   useEffect(() => {
-    // If running inside Electron with astrixAPI exposed
     if (window.astrixAPI) {
       window.astrixAPI.getState().then((state) => {
-        if (state && state.tabs.length > 0) {
-          setTabState(state)
-        }
+        if (state && state.tabs.length > 0) setTabState(state)
       })
 
-      const unsubscribe = window.astrixAPI.onTabsUpdated((newState) => {
+      window.astrixAPI.getBookmarks().then(setBookmarks)
+      window.astrixAPI.getDownloads().then(setDownloads)
+      window.astrixAPI.getPreferences().then((p) => {
+        if (p) setPreferences(p)
+      })
+
+      // Subscriptions
+      const unsubTabs = window.astrixAPI.onTabsUpdated((newState) => {
         setTabState(newState)
       })
 
+      const unsubDl = window.astrixAPI.onDownloadsUpdated((newDls) => {
+        setDownloads(newDls)
+      })
+
+      const unsubFindRes = window.astrixAPI.onFindResult((res) => {
+        setFindResult(res)
+      })
+
+      const unsubFindToggle = window.astrixAPI.onFindToggle(() => {
+        setShowFind((prev) => !prev)
+      })
+
+      const unsubHistoryToggle = window.astrixAPI.onHistoryToggle(() => {
+        setShowHistory((prev) => !prev)
+      })
+
+      const unsubBookmarkToggle = window.astrixAPI.onBookmarkToggle(() => {
+        handleToggleBookmark()
+      })
+
       return () => {
-        unsubscribe?.()
+        unsubTabs?.()
+        unsubDl?.()
+        unsubFindRes?.()
+        unsubFindToggle?.()
+        unsubHistoryToggle?.()
+        unsubBookmarkToggle?.()
       }
     } else {
-      // Fallback preview state if launched outside Electron
+      // Fallback preview
       setTabState({
         tabs: [
           {
@@ -50,50 +112,40 @@ export const App: React.FC = () => {
   }, [])
 
   const activeTab = tabState.tabs.find((t) => t.id === tabState.activeTabId)
+  const isBookmarked = activeTab
+    ? bookmarks.some((b) => b.url === activeTab.url)
+    : false
 
+  const activeDownloadCount = downloads.filter((d) => d.state === 'progressing').length
+
+  // --- Handlers ---
   const handleCreateTab = (url?: string) => {
     if (window.astrixAPI) {
       window.astrixAPI.createTab(url)
-    } else {
-      const newTab: Tab = {
-        id: `mock-${Date.now()}`,
-        title: url ? 'Loading...' : 'New Tab',
-        url: url || 'astrix://newtab',
-        isLoading: false,
-        canGoBack: false,
-        canGoForward: false,
-        zoomFactor: 1.0,
-        isAudible: false,
-        isMuted: false
-      }
-      setTabState((prev) => ({
-        ...prev,
-        tabs: [...prev.tabs, newTab],
-        activeTabId: newTab.id
-      }))
+    }
+  }
+
+  const handleDuplicateTab = (id: string) => {
+    if (window.astrixAPI) {
+      window.astrixAPI.duplicateTab(id)
     }
   }
 
   const handleSwitchTab = (tabId: string) => {
     if (window.astrixAPI) {
       window.astrixAPI.switchTab(tabId)
-    } else {
-      setTabState((prev) => ({ ...prev, activeTabId: tabId }))
     }
   }
 
   const handleCloseTab = (tabId: string) => {
     if (window.astrixAPI) {
       window.astrixAPI.closeTab(tabId)
-    } else {
-      setTabState((prev) => {
-        const filtered = prev.tabs.filter((t) => t.id !== tabId)
-        return {
-          ...prev,
-          tabs: filtered,
-          activeTabId: filtered.length > 0 ? filtered[0].id : ''
-        }
-      })
+    }
+  }
+
+  const handleCloseOtherTabs = (tabId: string) => {
+    if (window.astrixAPI) {
+      window.astrixAPI.closeOtherTabs(tabId)
     }
   }
 
@@ -101,13 +153,6 @@ export const App: React.FC = () => {
     if (!tabState.activeTabId) return
     if (window.astrixAPI) {
       window.astrixAPI.navigate(tabState.activeTabId, input)
-    } else {
-      setTabState((prev) => ({
-        ...prev,
-        tabs: prev.tabs.map((t) =>
-          t.id === prev.activeTabId ? { ...t, url: input, title: input } : t
-        )
-      }))
     }
   }
 
@@ -135,8 +180,60 @@ export const App: React.FC = () => {
     }
   }
 
+  const handleToggleMute = (tabId: string) => {
+    if (window.astrixAPI) {
+      window.astrixAPI.toggleMute(tabId)
+    }
+  }
+
   const handleHome = () => {
-    handleNavigate('astrix://newtab')
+    handleNavigate(preferences.homepage || 'astrix://newtab')
+  }
+
+  // Bookmarks
+  const handleToggleBookmark = useCallback(async () => {
+    if (!activeTab || activeTab.url === 'astrix://newtab' || !window.astrixAPI) return
+
+    if (isBookmarked) {
+      await window.astrixAPI.removeBookmark(activeTab.url)
+    } else {
+      await window.astrixAPI.addBookmark(
+        activeTab.title || activeTab.url,
+        activeTab.url,
+        activeTab.favicon
+      )
+    }
+    const updated = await window.astrixAPI.getBookmarks()
+    setBookmarks(updated)
+  }, [activeTab, isBookmarked])
+
+  const handleRemoveBookmark = async (id: string) => {
+    if (window.astrixAPI) {
+      await window.astrixAPI.removeBookmark(id)
+      setBookmarks((prev) => prev.filter((b) => b.id !== id))
+    }
+  }
+
+  // Preferences
+  const handleUpdatePreferences = async (partial: Partial<UserPreferences>) => {
+    if (window.astrixAPI) {
+      const updated = await window.astrixAPI.updatePreferences(partial)
+      setPreferences(updated)
+    }
+  }
+
+  // Find in page
+  const handleFind = (text: string, forward: boolean, findNext: boolean) => {
+    if (window.astrixAPI) {
+      window.astrixAPI.findStart(text, forward, findNext)
+    }
+  }
+
+  const handleCloseFind = () => {
+    setShowFind(false)
+    if (window.astrixAPI) {
+      window.astrixAPI.findStop()
+    }
   }
 
   const isShowingNewTab = !activeTab || activeTab.url === 'astrix://newtab'
@@ -150,17 +247,78 @@ export const App: React.FC = () => {
           onSwitchTab={handleSwitchTab}
           onCloseTab={handleCloseTab}
           onNewTab={() => handleCreateTab()}
+          onDuplicateTab={handleDuplicateTab}
+          onCloseOtherTabs={handleCloseOtherTabs}
+          onReloadTab={(id) => window.astrixAPI?.reload(id)}
+          onToggleMute={handleToggleMute}
         />
         <Toolbar
           activeTab={activeTab}
+          isBookmarked={isBookmarked}
+          activeDownloadCount={activeDownloadCount}
           onNavigate={handleNavigate}
           onGoBack={handleGoBack}
           onGoForward={handleGoForward}
           onReload={handleReload}
           onStop={handleStop}
           onHome={handleHome}
+          onToggleBookmark={handleToggleBookmark}
+          onToggleSiteInfo={() => setShowSiteInfo((prev) => !prev)}
+          onOpenHistory={() => setShowHistory(true)}
+          onOpenDownloads={() => setShowDownloads(true)}
+          onOpenSettings={() => setShowSettings(true)}
         />
+        {preferences.showBookmarksBar && bookmarks.length > 0 && (
+          <BookmarksBar
+            bookmarks={bookmarks}
+            onNavigate={handleNavigate}
+            onRemoveBookmark={handleRemoveBookmark}
+          />
+        )}
       </header>
+
+      {/* Floating Find in Page Bar */}
+      {showFind && (
+        <FindInPage
+          onFind={handleFind}
+          onClose={handleCloseFind}
+          findResult={findResult}
+        />
+      )}
+
+      {/* Site Info Card */}
+      {showSiteInfo && activeTab && (
+        <SiteInfoModal
+          url={activeTab.url}
+          title={activeTab.title}
+          onClose={() => setShowSiteInfo(false)}
+        />
+      )}
+
+      {/* History Modal */}
+      {showHistory && (
+        <HistoryModal
+          onClose={() => setShowHistory(false)}
+          onNavigate={handleNavigate}
+        />
+      )}
+
+      {/* Downloads Modal */}
+      {showDownloads && (
+        <DownloadsModal
+          onClose={() => setShowDownloads(false)}
+          downloads={downloads}
+        />
+      )}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <SettingsModal
+          preferences={preferences}
+          onUpdatePreferences={handleUpdatePreferences}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
 
       {/* When active tab is on astrix://newtab, show the rich new-tab page */}
       {isShowingNewTab && <NewTabPage onNavigate={handleNavigate} />}

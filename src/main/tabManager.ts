@@ -1,17 +1,27 @@
 import { BrowserWindow, BrowserView } from 'electron'
 import { Tab, TabState, SearchEngine } from './types'
 import { normalizeInputToUrl, generateErrorPageHtml } from './urlUtils'
+import { StorageService } from './storageService'
+import { setupWebContextMenu } from './contextMenu'
 
 export class TabManager {
   private mainWindow: BrowserWindow
+  private storageService: StorageService
   private tabs: Map<string, { tab: Tab; view: BrowserView }> = new Map()
   private activeTabId: string = ''
-  private toolbarHeight: number = 78
-  private activeSearchEngine: SearchEngine = 'google'
+  private toolbarHeight: number = 110 // default with bookmarks bar (78px without)
 
-  constructor(mainWindow: BrowserWindow) {
+  constructor(mainWindow: BrowserWindow, storageService: StorageService) {
     this.mainWindow = mainWindow
+    this.storageService = storageService
+    this.updateToolbarHeightFromPreferences()
     this.setupWindowListeners()
+  }
+
+  public updateToolbarHeightFromPreferences(): void {
+    const prefs = this.storageService.getPreferences()
+    this.toolbarHeight = prefs.showBookmarksBar ? 110 : 78
+    this.updateActiveViewBounds()
   }
 
   private setupWindowListeners(): void {
@@ -21,15 +31,16 @@ export class TabManager {
   }
 
   public getState(): TabState {
+    const prefs = this.storageService.getPreferences()
     return {
       tabs: Array.from(this.tabs.values()).map((entry) => ({ ...entry.tab })),
       activeTabId: this.activeTabId,
-      activeSearchEngine: this.activeSearchEngine
+      activeSearchEngine: prefs.searchEngine
     }
   }
 
   public setSearchEngine(engine: SearchEngine): void {
-    this.activeSearchEngine = engine
+    this.storageService.updatePreferences({ searchEngine: engine })
     this.notifyStateChange()
   }
 
@@ -40,9 +51,9 @@ export class TabManager {
 
   public createTab(initialUrl?: string): Tab {
     const id = `tab-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
-    const normalizedUrl = initialUrl
-      ? normalizeInputToUrl(initialUrl, this.activeSearchEngine)
-      : 'astrix://newtab'
+    const prefs = this.storageService.getPreferences()
+    const targetUrl = initialUrl || prefs.homepage || 'astrix://newtab'
+    const normalizedUrl = normalizeInputToUrl(targetUrl, prefs.searchEngine)
     const isNewTab = normalizedUrl === 'astrix://newtab'
 
     const view = new BrowserView({
@@ -68,6 +79,8 @@ export class TabManager {
     }
 
     this.setupViewListeners(id, view)
+    setupWebContextMenu(view.webContents, (url) => this.createTab(url))
+
     this.tabs.set(id, { tab, view })
 
     if (!isNewTab) {
@@ -78,6 +91,13 @@ export class TabManager {
 
     this.switchTab(id)
     return tab
+  }
+
+  public duplicateTab(tabId?: string): Tab | undefined {
+    const targetId = tabId || this.activeTabId
+    const entry = this.tabs.get(targetId)
+    if (!entry) return undefined
+    return this.createTab(entry.tab.url)
   }
 
   private setupViewListeners(tabId: string, view: BrowserView): void {
@@ -106,6 +126,10 @@ export class TabManager {
       if (entry) {
         entry.tab.title = title || 'Untitled'
         this.notifyStateChange()
+        // Update history title if already logged
+        if (entry.tab.url && !entry.tab.url.startsWith('astrix://')) {
+          this.storageService.addHistory(entry.tab.title, entry.tab.url, entry.tab.favicon)
+        }
       }
     })
 
@@ -124,6 +148,9 @@ export class TabManager {
         entry.tab.canGoBack = webContents.canGoBack()
         entry.tab.canGoForward = webContents.canGoForward()
         this.notifyStateChange()
+
+        // Record history
+        this.storageService.addHistory(entry.tab.title, url, entry.tab.favicon)
       }
     })
 
@@ -137,9 +164,8 @@ export class TabManager {
       }
     })
 
-    // Navigation failure & error handling
+    // Navigation failure & error recovery
     webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-      // Ignore user-aborted navigation (e.g. clicking another link before previous finishes)
       if (isMainFrame && errorCode !== -3) {
         const errorHtml = generateErrorPageHtml(validatedURL, errorDescription, errorCode)
         webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml)}`)
@@ -163,7 +189,17 @@ export class TabManager {
       }
     })
 
-    // Pop-up security: redirect target="_blank" and window.open to a managed Astrix tab
+    // Find in page results
+    webContents.on('found-in-page', (_event, result) => {
+      if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+      this.mainWindow.webContents.send('find:result', {
+        activeMatchOrdinal: result.activeMatchOrdinal,
+        matches: result.matches,
+        finalUpdate: result.finalUpdate
+      })
+    })
+
+    // Pop-up security
     webContents.setWindowOpenHandler(({ url }) => {
       this.createTab(url)
       return { action: 'deny' }
@@ -173,7 +209,6 @@ export class TabManager {
   public switchTab(tabId: string): void {
     if (!this.tabs.has(tabId)) return
 
-    // Detach previous view if one was mounted
     if (this.activeTabId && this.tabs.has(this.activeTabId)) {
       const prevEntry = this.tabs.get(this.activeTabId)!
       try {
@@ -186,7 +221,6 @@ export class TabManager {
     this.activeTabId = tabId
     const currentEntry = this.tabs.get(tabId)!
 
-    // If current tab is not on new tab, attach its view
     if (currentEntry.tab.url !== 'astrix://newtab') {
       this.mainWindow.addBrowserView(currentEntry.view)
       this.updateActiveViewBounds()
@@ -235,7 +269,6 @@ export class TabManager {
 
     this.tabs.delete(targetId)
 
-    // If active tab was closed, select adjacent tab
     if (this.activeTabId === targetId) {
       if (this.tabs.size === 0) {
         this.createTab()
@@ -250,11 +283,20 @@ export class TabManager {
     }
   }
 
+  public closeOtherTabs(tabId: string): void {
+    const targetId = tabId || this.activeTabId
+    const toClose = Array.from(this.tabs.keys()).filter((id) => id !== targetId)
+    for (const id of toClose) {
+      this.closeTab(id)
+    }
+  }
+
   public navigate(tabId: string, input: string): void {
     const entry = this.tabs.get(tabId)
     if (!entry) return
 
-    const targetUrl = normalizeInputToUrl(input, this.activeSearchEngine)
+    const prefs = this.storageService.getPreferences()
+    const targetUrl = normalizeInputToUrl(input, prefs.searchEngine)
     entry.tab.url = targetUrl
 
     if (targetUrl === 'astrix://newtab') {
@@ -270,7 +312,6 @@ export class TabManager {
       return
     }
 
-    // Attach view if it was not attached
     if (this.activeTabId === tabId) {
       try {
         this.mainWindow.addBrowserView(entry.view)
@@ -385,6 +426,34 @@ export class TabManager {
         entry.view.webContents.openDevTools({ mode: 'right' })
       }
     }
+  }
+
+  public printPage(tabId?: string): void {
+    const id = tabId || this.activeTabId
+    const entry = this.tabs.get(id)
+    if (entry && entry.tab.url !== 'astrix://newtab') {
+      entry.view.webContents.print()
+    }
+  }
+
+  // --- Find in Page ---
+  public findInPage(text: string, forward: boolean = true, findNext: boolean = false): void {
+    if (!this.activeTabId || !this.tabs.has(this.activeTabId)) return
+    const entry = this.tabs.get(this.activeTabId)!
+    if (entry.tab.url === 'astrix://newtab') return
+
+    if (!text.trim()) {
+      entry.view.webContents.stopFindInPage('clearSelection')
+      return
+    }
+
+    entry.view.webContents.findInPage(text, { forward, findNext })
+  }
+
+  public stopFindInPage(): void {
+    if (!this.activeTabId || !this.tabs.has(this.activeTabId)) return
+    const entry = this.tabs.get(this.activeTabId)!
+    entry.view.webContents.stopFindInPage('clearSelection')
   }
 
   public updateActiveViewBounds(): void {

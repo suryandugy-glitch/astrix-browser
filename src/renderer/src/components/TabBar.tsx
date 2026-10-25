@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Tab } from '../../../main/types'
 
 interface TabBarProps {
@@ -7,6 +7,10 @@ interface TabBarProps {
   onSwitchTab: (id: string) => void
   onCloseTab: (id: string) => void
   onNewTab: () => void
+  onDuplicateTab: (id: string) => void
+  onCloseOtherTabs: (id: string) => void
+  onReloadTab: (id: string) => void
+  onToggleMute: (id: string) => void
 }
 
 export const TabBar: React.FC<TabBarProps> = ({
@@ -14,10 +18,33 @@ export const TabBar: React.FC<TabBarProps> = ({
   activeTabId,
   onSwitchTab,
   onCloseTab,
-  onNewTab
+  onNewTab,
+  onDuplicateTab,
+  onCloseOtherTabs,
+  onReloadTab,
+  onToggleMute
 }) => {
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean
+    x: number
+    y: number
+    tabId: string
+  } | null>(null)
+
+  const handleContextMenu = (e: React.MouseEvent, tabId: string) => {
+    e.preventDefault()
+    setContextMenu({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      tabId
+    })
+  }
+
+  const closeMenu = () => setContextMenu(null)
+
   return (
-    <div className="tab-bar-container">
+    <div className="tab-bar-container" onClick={closeMenu}>
       <div className="tabs-list">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId
@@ -26,6 +53,7 @@ export const TabBar: React.FC<TabBarProps> = ({
               key={tab.id}
               className={`tab-item ${isActive ? 'active' : ''}`}
               onClick={() => onSwitchTab(tab.id)}
+              onContextMenu={(e) => handleContextMenu(e, tab.id)}
               title={tab.title}
             >
               {tab.favicon ? (
@@ -34,7 +62,6 @@ export const TabBar: React.FC<TabBarProps> = ({
                   alt=""
                   className="tab-favicon"
                   onError={(e) => {
-                    // Fallback if favicon fails to load
                     ;(e.target as HTMLElement).style.display = 'none'
                   }}
                 />
@@ -56,9 +83,23 @@ export const TabBar: React.FC<TabBarProps> = ({
 
               <span className="tab-title">{tab.title || 'New Tab'}</span>
 
+              {/* Audible / Mute icon */}
+              {tab.isAudible && (
+                <button
+                  className="tab-audio-btn"
+                  title={tab.isMuted ? 'Unmute tab' : 'Mute tab'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onToggleMute(tab.id)
+                  }}
+                >
+                  {tab.isMuted ? '🔇' : '🔊'}
+                </button>
+              )}
+
               <button
                 className="tab-close-btn"
-                title="Close Tab"
+                title="Close Tab (Ctrl+W)"
                 onClick={(e) => {
                   e.stopPropagation()
                   onCloseTab(tab.id)
@@ -81,7 +122,7 @@ export const TabBar: React.FC<TabBarProps> = ({
         })}
       </div>
 
-      <button className="tab-new-btn" onClick={onNewTab} title="New Tab">
+      <button className="tab-new-btn" onClick={onNewTab} title="New Tab (Ctrl+T)">
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -94,6 +135,62 @@ export const TabBar: React.FC<TabBarProps> = ({
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg>
       </button>
+
+      {/* Tab Context Menu */}
+      {contextMenu?.visible && (
+        <div
+          className="tab-context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className="ctx-item"
+            onClick={() => {
+              onReloadTab(contextMenu.tabId)
+              closeMenu()
+            }}
+          >
+            Reload
+          </div>
+          <div
+            className="ctx-item"
+            onClick={() => {
+              onDuplicateTab(contextMenu.tabId)
+              closeMenu()
+            }}
+          >
+            Duplicate
+          </div>
+          <div
+            className="ctx-item"
+            onClick={() => {
+              onToggleMute(contextMenu.tabId)
+              closeMenu()
+            }}
+          >
+            Mute / Unmute
+          </div>
+          <div className="ctx-divider" />
+          <div
+            className="ctx-item"
+            onClick={() => {
+              onCloseOtherTabs(contextMenu.tabId)
+              closeMenu()
+            }}
+          >
+            Close Other Tabs
+          </div>
+          <div
+            className="ctx-item ctx-danger"
+            onClick={() => {
+              onCloseTab(contextMenu.tabId)
+              closeMenu()
+            }}
+          >
+            Close Tab
+          </div>
+        </div>
+      )}
     </div>
   )
 }

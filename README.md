@@ -3,22 +3,23 @@
 An independent Chromium-based browser distribution built for speed, security, privacy, and a modern browsing experience.
 
 ## Status
-Prototype / MVP Foundation. Implemented features and known limitations:
+Full Modern Desktop Browser MVP. Implemented features:
 
-### Implemented (Browser Core & Shell)
-- [x] Multi-tab lifecycle: create, switch, close, and active tab management
-- [x] Omnibox / address bar: direct URL entry and search query handling
-- [x] Navigation engine: Back, Forward, Reload, Stop, and loading state updates
-- [x] Web content rendering: isolated `BrowserView` integration inside the desktop window
-- [x] Security architecture: context isolation enabled, nodeIntegration disabled, safe IPC allowlist
-- [x] Popup & external navigation policy: popups handled safely as managed browser tabs
-- [x] Default Start / New Tab page with quick search and shortcuts
-
-### Planned Roadmap
-- [ ] UI Theme & Visual Polish (Owned by Gourab)
-- [ ] Bookmarks and History persistence (Owned by Soumik)
-- [ ] Downloads management & file validation (Owned by Soumik)
-- [ ] User preferences & settings panel (Owned by Gourab & Soumik)
+### Implemented Browser Core & Shell
+- [x] **Multi-Tab Engine**: Create, switch, close, close others, duplicate, and active tab state.
+- [x] **Omnibox & Search**: Direct URL navigation with protocol normalization and search providers (Google, DuckDuckGo, Brave, Bing).
+- [x] **Browser Controls**: Back, Forward, Reload, Force Reload (ignore cache), Stop, and Home.
+- [x] **Bookmarks System**: Star button in Omnibox, persistent Bookmarks Bar, and storage persistence.
+- [x] **Browsing History (`Ctrl+H`)**: Searchable history database with timestamps and single-click clear.
+- [x] **Downloads Manager (`Ctrl+J`)**: Native download tracking with progress bars, pause/resume, and folder reveal.
+- [x] **Find in Page (`Ctrl+F`)**: In-page search with real-time match counters, forward/backward navigation, and highlighting.
+- [x] **Settings Panel**: Configure default search engine, bookmarks bar visibility, start page, and privacy controls.
+- [x] **Site Security Inspector**: Omnibox security badge showing TLS encryption, protocol, and sandbox status.
+- [x] **Web & Tab Context Menus**: Native right-click menus for links, text selection, images, inspection, and tab lifecycle.
+- [x] **Keyboard Shortcuts**: Standard accelerators for tabs, navigation, zooming, history, find, and print.
+- [x] **Page Zooming**: Incremental zoom controls (`Ctrl+=`, `Ctrl+-`, `Ctrl+0`) with factor clamping.
+- [x] **Audio & Tab Muting**: Tab speaker waves indicator and click-to-mute.
+- [x] **Strict Security Sandbox**: `contextIsolation: true`, `nodeIntegration: false`, sandboxed web contents, and default-deny permissions.
 
 ---
 
@@ -37,7 +38,7 @@ Astrix Browser is developed by a dedicated 3-person team:
 ## Requirements
 
 - **Operating System**: Windows 10 / 11 (x64)
-- **Node.js**: LTS version 20.x or 22.x+ (Node `v24.x` also supported)
+- **Node.js**: LTS version 20.x or 22.x+ (Node `v24.x` supported)
 - **Git**: 2.30+
 - **Code Editor**: Visual Studio Code or Antigravity IDE
 
@@ -61,7 +62,13 @@ Astrix Browser is developed by a dedicated 3-person team:
    npm run dev
    ```
 
-4. **Build production executable:**
+4. **Run tests & typecheck:**
+   ```powershell
+   npm test
+   npm run lint
+   ```
+
+5. **Build production executable:**
    ```powershell
    npm run build
    npm run build:win
@@ -69,48 +76,26 @@ Astrix Browser is developed by a dedicated 3-person team:
 
 ---
 
-## Project Structure
+## Keyboard Shortcuts
 
-```text
-astrix-browser/
-├── .github/              # Issue templates, PR template, CI workflows
-├── docs/                 # Architecture, security baseline, QA test plan
-│   ├── ARCHITECTURE.md   # Core design & IPC interface contracts
-│   ├── SECURITY.md       # Security rules & safe Electron practices
-│   └── TEST_PLAN.md      # Manual test checklist & QA procedures
-├── src/
-│   ├── main/             # Electron main process & browser core (Suryandu)
-│   │   ├── index.ts      # App entry point, lifecycle & window management
-│   │   ├── tabManager.ts # Tab model, BrowserView management & navigation
-│   │   ├── urlUtils.ts   # URL validation, normalization & search query mapping
-│   │   └── types.ts      # Shared main process data structures
-│   ├── preload/          # Narrow, safe bridge between Main and UI (Suryandu + Soumik)
-│   │   ├── index.ts      # contextBridge.exposeInMainWorld API implementation
-│   │   └── index.d.ts    # Window.astrixAPI TypeScript type definitions
-│   └── renderer/         # React + TypeScript user interface (Gourab)
-│       ├── index.html    # Chrome container HTML
-│       └── src/
-│           ├── App.tsx   # Top-level browser chrome orchestrator
-│           ├── components/
-│           │   ├── TabBar.tsx     # Tab list, active state, new tab & close buttons
-│           │   ├── Toolbar.tsx    # Back, Forward, Reload, Omnibox address bar
-│           │   └── NewTabPage.tsx # Start page for fresh tabs
-│           └── assets/   # Styles and assets
-└── tests/                # Test suites & verification scripts
-```
-
----
-
-## Security
-
-Astrix Browser handles untrusted remote web pages. The following principles are strictly enforced:
-- **Node.js Integration is disabled** for all remote web content.
-- **Context Isolation is enabled** across all renderer windows and views.
-- **Preload API is minimal**: Only explicit browser actions (`tab:create`, `tab:navigate`, etc.) are exposed.
-- **Safe navigation**: Arbitrary dangerous protocols (`javascript:`, `file:`) are blocked.
-- **Pop-up protection**: Remote websites cannot open arbitrary untracked windows; requests are inspected and contained within tabs.
-
-Report security vulnerabilities privately to project maintainers. Do not publish credentials or secrets to public repositories.
+| Shortcut | Action |
+|---|---|
+| `Ctrl+T` | Open new tab |
+| `Ctrl+W` | Close active tab |
+| `Ctrl+Shift+D` | Duplicate tab |
+| `Ctrl+R` / `F5` | Reload page |
+| `Ctrl+Shift+R` | Force reload (ignore cache) |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Switch to next / previous tab |
+| `Ctrl+1` .. `Ctrl+8` | Switch to tab index 1–8 |
+| `Ctrl+F` | Find text in page |
+| `Ctrl+H` | Open Browsing History |
+| `Ctrl+J` | Open Downloads manager |
+| `Ctrl+D` | Bookmark current tab |
+| `Ctrl+Shift+B` | Toggle Bookmarks Bar |
+| `Ctrl+=` / `Ctrl+-` | Zoom in / Zoom out |
+| `Ctrl+0` | Reset zoom to 100% |
+| `Ctrl+P` | Print page |
+| `F12` | Toggle Chrome DevTools |
 
 ---
 

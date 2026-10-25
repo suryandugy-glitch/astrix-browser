@@ -2,9 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 const BLOCKED_SCHEMES = ['javascript:', 'file:', 'data:', 'vbscript:']
-const DEFAULT_SEARCH_ENGINE = 'https://www.google.com/search?q='
+const SEARCH_ENGINES = {
+  google: 'https://www.google.com/search?q=',
+  duckduckgo: 'https://duckduckgo.com/?q=',
+  bing: 'https://www.bing.com/search?q=',
+  brave: 'https://search.brave.com/search?q='
+}
 
-function normalizeInputToUrl(input) {
+function normalizeInputToUrl(input, engine = 'google') {
   const trimmed = input.trim()
   if (!trimmed) return 'astrix://newtab'
   if (trimmed.startsWith('astrix://')) return trimmed
@@ -27,7 +32,8 @@ function normalizeInputToUrl(input) {
   if (domainPattern.test(trimmed)) {
     return `https://${trimmed}`
   }
-  return `${DEFAULT_SEARCH_ENGINE}${encodeURIComponent(trimmed)}`
+  const searchBase = SEARCH_ENGINES[engine] || SEARCH_ENGINES.google
+  return `${searchBase}${encodeURIComponent(trimmed)}`
 }
 
 test('normalizes web URLs with https', () => {
@@ -39,10 +45,24 @@ test('normalizes localhost to http', () => {
   assert.equal(normalizeInputToUrl('localhost:3000'), 'http://localhost:3000')
 })
 
-test('converts plain queries to search URL', () => {
+test('converts plain queries to search URL using Google default', () => {
   assert.equal(
     normalizeInputToUrl('astrix browser'),
     'https://www.google.com/search?q=astrix%20browser'
+  )
+})
+
+test('converts plain queries to DuckDuckGo when specified', () => {
+  assert.equal(
+    normalizeInputToUrl('astrix browser', 'duckduckgo'),
+    'https://duckduckgo.com/?q=astrix%20browser'
+  )
+})
+
+test('converts plain queries to Brave search when specified', () => {
+  assert.equal(
+    normalizeInputToUrl('astrix browser', 'brave'),
+    'https://search.brave.com/search?q=astrix%20browser'
   )
 })
 

@@ -7,7 +7,8 @@ import { NewTabPage } from './components/NewTabPage'
 export const App: React.FC = () => {
   const [tabState, setTabState] = useState<TabState>({
     tabs: [],
-    activeTabId: ''
+    activeTabId: '',
+    activeSearchEngine: 'google'
   })
 
   useEffect(() => {
@@ -36,10 +37,14 @@ export const App: React.FC = () => {
             url: 'astrix://newtab',
             isLoading: false,
             canGoBack: false,
-            canGoForward: false
+            canGoForward: false,
+            zoomFactor: 1.0,
+            isAudible: false,
+            isMuted: false
           }
         ],
-        activeTabId: 'mock-1'
+        activeTabId: 'mock-1',
+        activeSearchEngine: 'google'
       })
     }
   }, [])
@@ -56,9 +61,13 @@ export const App: React.FC = () => {
         url: url || 'astrix://newtab',
         isLoading: false,
         canGoBack: false,
-        canGoForward: false
+        canGoForward: false,
+        zoomFactor: 1.0,
+        isAudible: false,
+        isMuted: false
       }
       setTabState((prev) => ({
+        ...prev,
         tabs: [...prev.tabs, newTab],
         activeTabId: newTab.id
       }))
@@ -80,6 +89,7 @@ export const App: React.FC = () => {
       setTabState((prev) => {
         const filtered = prev.tabs.filter((t) => t.id !== tabId)
         return {
+          ...prev,
           tabs: filtered,
           activeTabId: filtered.length > 0 ? filtered[0].id : ''
         }

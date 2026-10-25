@@ -21,7 +21,7 @@ Astrix Browser separates desktop browser controls (the "Chrome") from untrusted 
 ```
 
 - **Electron Main Process (`src/main/`)**:
-  - Owns window creation, application lifecycle, and security controls.
+  - Owns window creation, application lifecycle, accelerators, and security controls.
   - Controls the `TabManager`, maintaining tab metadata and instantiating a native `BrowserView` per tab.
   - Validates all input received from the UI and safely manages navigation.
 - **Preload Bridge (`src/preload/`)**:
@@ -50,6 +50,9 @@ export interface Tab {
   isLoading: boolean
   canGoBack: boolean
   canGoForward: boolean
+  zoomFactor: number
+  isAudible: boolean
+  isMuted: boolean
 }
 ```
 
@@ -57,7 +60,7 @@ export interface Tab {
 1. **Create Tab (`tab:create`)**:
    - Generates a unique UUID / ID.
    - Creates a dedicated `BrowserView` with `contextIsolation: true` and `nodeIntegration: false`.
-   - Attaches webContents listeners (`did-start-loading`, `did-stop-loading`, `page-title-updated`, `page-favicon-updated`, `did-navigate`).
+   - Attaches webContents listeners (`did-start-loading`, `did-stop-loading`, `page-title-updated`, `page-favicon-updated`, `did-navigate`, `did-fail-load`, `media-started-playing`, `media-paused`).
    - If initial URL is provided, navigates; otherwise sets default title "New Tab" and url `astrix://newtab`.
    - Activates the newly created tab.
 2. **Switch Tab (`tab:switch`)**:
@@ -80,24 +83,48 @@ All navigation queries flow through `src/main/urlUtils.ts`:
 - **Explicit HTTP / HTTPS URLs** (e.g. `https://news.ycombinator.com`): Preserved and loaded directly.
 - **Web domains without scheme** (e.g. `github.com`, `reddit.com/r/technology`): Prepended with `https://`.
 - **Localhost addresses** (e.g. `localhost:3000`): Allowed and prepended with `http://`.
-- **Search phrases** (e.g. `how to build electron browser`, `vite vs webpack`): Routed to Google search: `https://www.google.com/search?q={query}`.
+- **Search phrases**: Routed to the active search provider (`google`, `duckduckgo`, `bing`, or `brave`).
 - **Disallowed schemes**: `javascript:`, `file:`, `data:` (except favicons), `vbscript:` are rejected to prevent security risks.
+- **Error Recovery**: If a page fails to load, `did-fail-load` catches the error and loads a branded friendly error recovery page.
 
 ---
 
-## 4. IPC API Contract (`window.astrixAPI`)
+## 4. Keyboard Shortcuts
+
+Standard browser accelerators are bound in the main process:
+- `Ctrl+T`: New tab
+- `Ctrl+W`: Close active tab
+- `Ctrl+R` / `F5`: Reload page
+- `Ctrl+Shift+R`: Hard reload (ignore cache)
+- `Ctrl+Tab` / `Ctrl+Shift+Tab`: Next / Previous tab
+- `Ctrl+1` through `Ctrl+8`: Switch to tab 1 through 8
+- `Ctrl+=` / `Ctrl+-`: Zoom in / Zoom out
+- `Ctrl+0`: Reset zoom
+- `F12`: Toggle Developer Tools for the active tab
+- `Alt+Left` / `Alt+Right`: Back / Forward navigation
+
+---
+
+## 5. IPC API Contract (`window.astrixAPI`)
 
 The preload script exposes the following typed API to `window.astrixAPI`:
 
 | Method | Direction | Description |
 |---|---|---|
 | `createTab(url?: string)` | Invoke (`tab:create`) | Creates and switches to a new tab |
-| `closeTab(id: string)` | Invoke (`tab:close`) | Closes specified tab |
+| `closeTab(id?: string)` | Invoke (`tab:close`) | Closes specified or active tab |
 | `switchTab(id: string)` | Invoke (`tab:switch`) | Sets specified tab as active |
 | `navigate(id: string, query: string)` | Invoke (`tab:navigate`) | Navigates the tab to a URL or search query |
-| `goBack(id: string)` | Invoke (`tab:go-back`) | Navigates back in tab history |
-| `goForward(id: string)` | Invoke (`tab:go-forward`) | Navigates forward in tab history |
-| `reload(id: string)` | Invoke (`tab:reload`) | Reloads current page |
-| `stop(id: string)` | Invoke (`tab:stop`) | Cancels active loading |
-| `getState()` | Invoke (`tab:get-state`) | Gets initial tabs array and active tab ID |
+| `goBack(id?: string)` | Invoke (`tab:go-back`) | Navigates back in tab history |
+| `goForward(id?: string)` | Invoke (`tab:go-forward`) | Navigates forward in tab history |
+| `reload(id?: string)` | Invoke (`tab:reload`) | Reloads current page |
+| `reloadIgnoringCache(id?: string)` | Invoke (`tab:reload-ignore-cache`) | Hard reloads page ignoring cached assets |
+| `stop(id?: string)` | Invoke (`tab:stop`) | Cancels active loading |
+| `zoomIn(id?: string)` | Invoke (`tab:zoom-in`) | Increases zoom level by 10% |
+| `zoomOut(id?: string)` | Invoke (`tab:zoom-out`) | Decreases zoom level by 10% |
+| `resetZoom(id?: string)` | Invoke (`tab:reset-zoom`) | Resets zoom level to 100% |
+| `toggleMute(id?: string)` | Invoke (`tab:toggle-mute`) | Toggles audio mute for tab |
+| `toggleDevTools(id?: string)` | Invoke (`tab:toggle-devtools`) | Opens/closes DevTools for active tab |
+| `setSearchEngine(engine)` | Invoke (`tab:set-search-engine`) | Configures active search provider |
+| `getState()` | Invoke (`tab:get-state`) | Gets initial tabs array, active tab ID & engine |
 | `onTabsUpdated(cb)` | Listen (`tab:state-changed`) | Receives real-time tab list & active tab updates |

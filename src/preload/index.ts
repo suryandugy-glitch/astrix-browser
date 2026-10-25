@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { Tab, TabState } from '../main/types'
+import { Tab, TabState, SearchEngine } from '../main/types'
 
 const astrixAPI = {
   createTab: (url?: string): Promise<Tab> => {
@@ -10,7 +10,7 @@ const astrixAPI = {
     return ipcRenderer.invoke('tab:switch', tabId)
   },
 
-  closeTab: (tabId: string): Promise<void> => {
+  closeTab: (tabId?: string): Promise<void> => {
     return ipcRenderer.invoke('tab:close', tabId)
   },
 
@@ -18,20 +18,48 @@ const astrixAPI = {
     return ipcRenderer.invoke('tab:navigate', tabId, input)
   },
 
-  goBack: (tabId: string): Promise<void> => {
+  goBack: (tabId?: string): Promise<void> => {
     return ipcRenderer.invoke('tab:go-back', tabId)
   },
 
-  goForward: (tabId: string): Promise<void> => {
+  goForward: (tabId?: string): Promise<void> => {
     return ipcRenderer.invoke('tab:go-forward', tabId)
   },
 
-  reload: (tabId: string): Promise<void> => {
+  reload: (tabId?: string): Promise<void> => {
     return ipcRenderer.invoke('tab:reload', tabId)
   },
 
-  stop: (tabId: string): Promise<void> => {
+  reloadIgnoringCache: (tabId?: string): Promise<void> => {
+    return ipcRenderer.invoke('tab:reload-ignore-cache', tabId)
+  },
+
+  stop: (tabId?: string): Promise<void> => {
     return ipcRenderer.invoke('tab:stop', tabId)
+  },
+
+  zoomIn: (tabId?: string): Promise<void> => {
+    return ipcRenderer.invoke('tab:zoom-in', tabId)
+  },
+
+  zoomOut: (tabId?: string): Promise<void> => {
+    return ipcRenderer.invoke('tab:zoom-out', tabId)
+  },
+
+  resetZoom: (tabId?: string): Promise<void> => {
+    return ipcRenderer.invoke('tab:reset-zoom', tabId)
+  },
+
+  toggleMute: (tabId?: string): Promise<void> => {
+    return ipcRenderer.invoke('tab:toggle-mute', tabId)
+  },
+
+  toggleDevTools: (tabId?: string): Promise<void> => {
+    return ipcRenderer.invoke('tab:toggle-devtools', tabId)
+  },
+
+  setSearchEngine: (engine: SearchEngine): Promise<void> => {
+    return ipcRenderer.invoke('tab:set-search-engine', engine)
   },
 
   getState: (): Promise<TabState> => {

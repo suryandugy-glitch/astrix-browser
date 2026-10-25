@@ -1,3 +1,5 @@
+export type SearchEngine = 'google' | 'duckduckgo' | 'bing' | 'brave'
+
 export interface Tab {
   id: string
   url: string
@@ -6,9 +8,13 @@ export interface Tab {
   isLoading: boolean
   canGoBack: boolean
   canGoForward: boolean
+  zoomFactor: number
+  isAudible: boolean
+  isMuted: boolean
 }
 
 export interface TabState {
   tabs: Tab[]
   activeTabId: string
+  activeSearchEngine: SearchEngine
 }

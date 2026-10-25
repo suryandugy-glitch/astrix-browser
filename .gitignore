@@ -1,0 +1,26 @@
+.DS_Store
+node_modules
+dist
+dist-electron
+out
+build
+*.local
+.env
+.env.*
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea

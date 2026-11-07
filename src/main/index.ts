@@ -1,14 +1,65 @@
-import { app, BrowserWindow, ipcMain, session, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, session, Menu, dialog, nativeTheme } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
+import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { TabManager } from './tabManager'
 import { StorageService, UserPreferences } from './storageService'
 import { DownloadManager } from './downloadManager'
-import { SearchEngine } from './types'
+import type { SearchEngine } from './types'
+import { decidePermission, originOf } from './permissionPolicy'
+import type { Decision } from './permissionPolicy'
+import { isSearchEngine } from './validators'
 
 let mainWindow: BrowserWindow | null = null
 let tabManager: TabManager | null = null
 let storageService: StorageService | null = null
 let downloadManager: DownloadManager | null = null
+
+const WINDOW_BG: Record<string, string> = { dark: '#1e1f29', light: '#f4f5f8' }
+
+function applyTheme(theme: 'dark' | 'light' | 'system'): void {
+  nativeTheme.themeSource = theme
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const effective = theme === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : theme
+    mainWindow.setBackgroundColor(WINDOW_BG[effective])
+  }
+}
+
+/** Only the browser UI window may call IPC handlers. Web pages never can. */
+function isTrustedSender(event: IpcMainInvokeEvent): boolean {
+  return !!mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents
+}
+
+function handle(
+  channel: string,
+  listener: (event: IpcMainInvokeEvent, ...args: any[]) => unknown
+): void {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!isTrustedSender(event)) {
+      console.warn(`Rejected IPC "${channel}" from untrusted sender`)
+      return undefined
+    }
+    return listener(event, ...args)
+  })
+}
+
+function setupPermissions(): void {
+  const ses = session.defaultSession
+  const decide = (permission: string, url: string): Decision =>
+    decidePermission(permission, url, storageService?.getPermissionStore() ?? {})
+
+  ses.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    const decision = decide(permission, details.requestingUrl)
+    if (decision === 'deny') {
+      console.info(`Denied permission "${permission}" for ${details.requestingUrl}`)
+    }
+    callback(decision === 'allow')
+  })
+
+  ses.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
+    return decide(permission, requestingOrigin) === 'allow'
+  })
+}
 
 function setupApplicationMenu(): void {
   const isMac = process.platform === 'darwin'
@@ -171,7 +222,8 @@ function setupApplicationMenu(): void {
 }
 
 function createWindow(): void {
-  storageService = new StorageService()
+  const storage = new StorageService()
+  storageService = storage
   downloadManager = new DownloadManager()
 
   mainWindow = new BrowserWindow({
@@ -182,21 +234,28 @@ function createWindow(): void {
     title: 'Astrix Browser',
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#1e1e24',
+    backgroundColor: WINDOW_BG[storage.getPreferences().theme] ?? WINDOW_BG.dark,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      webSecurity: true
     }
   })
+  applyTheme(storage.getPreferences().theme)
 
-  tabManager = new TabManager(mainWindow, storageService)
+  tabManager = new TabManager(mainWindow, storage)
   downloadManager.setMainWindow(mainWindow)
 
-  // Security: Deny unreviewed permission requests by default
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
-    callback(false)
+  // Security: per-site permission policy (deny by default)
+  setupPermissions()
+
+  // The UI window itself must never navigate away or open windows.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    if (!devUrl || !url.startsWith(devUrl)) event.preventDefault()
   })
 
   setupApplicationMenu()
@@ -224,35 +283,35 @@ function createWindow(): void {
 // Register all IPC handlers
 function registerIpcHandlers(): void {
   // --- Tabs & Navigation ---
-  ipcMain.handle('tab:create', (_event, url?: string) => tabManager?.createTab(url))
-  ipcMain.handle('tab:duplicate', (_event, id?: string) => tabManager?.duplicateTab(id))
-  ipcMain.handle('tab:switch', (_event, tabId: string) => tabManager?.switchTab(tabId))
-  ipcMain.handle('tab:close', (_event, tabId?: string) => tabManager?.closeTab(tabId))
-  ipcMain.handle('tab:close-others', (_event, tabId: string) =>
+  handle('tab:create', (_event, url?: string) => tabManager?.createTab(url))
+  handle('tab:duplicate', (_event, id?: string) => tabManager?.duplicateTab(id))
+  handle('tab:switch', (_event, tabId: string) => tabManager?.switchTab(tabId))
+  handle('tab:close', (_event, tabId?: string) => tabManager?.closeTab(tabId))
+  handle('tab:close-others', (_event, tabId: string) =>
     tabManager?.closeOtherTabs(tabId)
   )
-  ipcMain.handle('tab:navigate', (_event, tabId: string, input: string) =>
+  handle('tab:navigate', (_event, tabId: string, input: string) =>
     tabManager?.navigate(tabId, input)
   )
-  ipcMain.handle('tab:go-back', (_event, tabId?: string) => tabManager?.goBack(tabId))
-  ipcMain.handle('tab:go-forward', (_event, tabId?: string) => tabManager?.goForward(tabId))
-  ipcMain.handle('tab:reload', (_event, tabId?: string) => tabManager?.reload(tabId))
-  ipcMain.handle('tab:reload-ignore-cache', (_event, tabId?: string) =>
+  handle('tab:go-back', (_event, tabId?: string) => tabManager?.goBack(tabId))
+  handle('tab:go-forward', (_event, tabId?: string) => tabManager?.goForward(tabId))
+  handle('tab:reload', (_event, tabId?: string) => tabManager?.reload(tabId))
+  handle('tab:reload-ignore-cache', (_event, tabId?: string) =>
     tabManager?.reloadIgnoringCache(tabId)
   )
-  ipcMain.handle('tab:stop', (_event, tabId?: string) => tabManager?.stop(tabId))
-  ipcMain.handle('tab:zoom-in', (_event, tabId?: string) => tabManager?.zoomIn(tabId))
-  ipcMain.handle('tab:zoom-out', (_event, tabId?: string) => tabManager?.zoomOut(tabId))
-  ipcMain.handle('tab:reset-zoom', (_event, tabId?: string) => tabManager?.resetZoom(tabId))
-  ipcMain.handle('tab:toggle-mute', (_event, tabId?: string) => tabManager?.toggleMute(tabId))
-  ipcMain.handle('tab:toggle-devtools', (_event, tabId?: string) =>
+  handle('tab:stop', (_event, tabId?: string) => tabManager?.stop(tabId))
+  handle('tab:zoom-in', (_event, tabId?: string) => tabManager?.zoomIn(tabId))
+  handle('tab:zoom-out', (_event, tabId?: string) => tabManager?.zoomOut(tabId))
+  handle('tab:reset-zoom', (_event, tabId?: string) => tabManager?.resetZoom(tabId))
+  handle('tab:toggle-mute', (_event, tabId?: string) => tabManager?.toggleMute(tabId))
+  handle('tab:toggle-devtools', (_event, tabId?: string) =>
     tabManager?.toggleDevTools(tabId)
   )
-  ipcMain.handle('tab:print', (_event, tabId?: string) => tabManager?.printPage(tabId))
-  ipcMain.handle('tab:set-search-engine', (_event, engine: SearchEngine) =>
-    tabManager?.setSearchEngine(engine)
-  )
-  ipcMain.handle('tab:get-state', () => {
+  handle('tab:print', (_event, tabId?: string) => tabManager?.printPage(tabId))
+  handle('tab:set-search-engine', (_event, engine: SearchEngine) => {
+    if (isSearchEngine(engine)) tabManager?.setSearchEngine(engine)
+  })
+  handle('tab:get-state', () => {
     return (
       tabManager?.getState() ?? {
         tabs: [],
@@ -263,58 +322,144 @@ function registerIpcHandlers(): void {
   })
 
   // --- Find in Page ---
-  ipcMain.handle(
+  handle(
     'find:start',
     (_event, text: string, forward: boolean, findNext: boolean) => {
       tabManager?.findInPage(text, forward, findNext)
     }
   )
-  ipcMain.handle('find:stop', () => {
+  handle('find:stop', () => {
     tabManager?.stopFindInPage()
   })
 
   // --- Bookmarks ---
-  ipcMain.handle('bookmarks:get', () => storageService?.getBookmarks() ?? [])
-  ipcMain.handle('bookmarks:add', (_event, title: string, url: string, favicon?: string) => {
+  handle('bookmarks:get', () => storageService?.getBookmarks() ?? [])
+  handle('bookmarks:add', (_event, title: string, url: string, favicon?: string) => {
     return storageService?.addBookmark(title, url, favicon)
   })
-  ipcMain.handle('bookmarks:remove', (_event, idOrUrl: string) => {
+  handle('bookmarks:remove', (_event, idOrUrl: string) => {
     return storageService?.removeBookmark(idOrUrl) ?? false
   })
-  ipcMain.handle('bookmarks:is-bookmarked', (_event, url: string) => {
+  handle('bookmarks:is-bookmarked', (_event, url: string) => {
     return storageService?.isBookmarked(url) ?? false
   })
 
   // --- History ---
-  ipcMain.handle('history:get', (_event, query?: string) => {
+  handle('history:get', (_event, query?: string) => {
     return storageService?.getHistory(query) ?? []
   })
-  ipcMain.handle('history:clear', () => {
+  handle('history:clear', () => {
     storageService?.clearHistory()
   })
-  ipcMain.handle('history:remove', (_event, id: string) => {
+  handle('history:remove', (_event, id: string) => {
     storageService?.removeHistoryItem(id)
   })
 
   // --- Downloads ---
-  ipcMain.handle('downloads:get', () => downloadManager?.getDownloads() ?? [])
-  ipcMain.handle('downloads:cancel', (_event, id: string) => downloadManager?.cancel(id))
-  ipcMain.handle('downloads:pause', (_event, id: string) => downloadManager?.pause(id))
-  ipcMain.handle('downloads:resume', (_event, id: string) => downloadManager?.resume(id))
-  ipcMain.handle('downloads:open-folder', (_event, id: string) =>
+  handle('downloads:get', () => downloadManager?.getDownloads() ?? [])
+  handle('downloads:cancel', (_event, id: string) => downloadManager?.cancel(id))
+  handle('downloads:pause', (_event, id: string) => downloadManager?.pause(id))
+  handle('downloads:resume', (_event, id: string) => downloadManager?.resume(id))
+  handle('downloads:open-folder', (_event, id: string) =>
     downloadManager?.openInFolder(id)
   )
 
   // --- Preferences ---
-  ipcMain.handle('preferences:get', () => storageService?.getPreferences())
-  ipcMain.handle('preferences:update', (_event, partial: Partial<UserPreferences>) => {
+  handle('preferences:get', () => storageService?.getPreferences())
+  handle('preferences:update', (_event, partial: unknown) => {
+    // Input is sanitized inside StorageService; unknown keys and bad values are dropped.
     const updated = storageService?.updatePreferences(partial)
+    if (updated) applyTheme(updated.theme)
     tabManager?.updateToolbarHeightFromPreferences()
     return updated
+  })
+
+  // --- Bookmark import / export ---
+  handle('bookmarks:import', async () => {
+    if (!mainWindow || !storageService) return 0
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import bookmarks',
+      filters: [{ name: 'Bookmarks HTML', extensions: ['html', 'htm'] }],
+      properties: ['openFile']
+    })
+    if (result.canceled || result.filePaths.length === 0) return 0
+    try {
+      const html = readFileSync(result.filePaths[0], 'utf-8')
+      return storageService.importBookmarksHtml(html)
+    } catch (e) {
+      console.error('Bookmark import failed:', e)
+      return 0
+    }
+  })
+  handle('bookmarks:export', async () => {
+    if (!mainWindow || !storageService) return false
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export bookmarks',
+      defaultPath: 'astrix-bookmarks.html',
+      filters: [{ name: 'Bookmarks HTML', extensions: ['html'] }]
+    })
+    if (result.canceled || !result.filePath) return false
+    try {
+      writeFileSync(result.filePath, storageService.exportBookmarksHtml(), 'utf-8')
+      return true
+    } catch (e) {
+      console.error('Bookmark export failed:', e)
+      return false
+    }
+  })
+
+  // --- New tab page data ---
+  handle('history:top-sites', (_event, limit?: number) =>
+    storageService?.getTopSites(typeof limit === 'number' ? Math.min(Math.max(limit, 1), 20) : 8) ?? []
+  )
+
+  // --- Downloads housekeeping ---
+  handle('downloads:clear-finished', () => downloadManager?.clearFinished())
+
+  // --- Site permissions ---
+  handle('permissions:list', () => storageService?.listSitePermissions() ?? [])
+  handle('permissions:remove', (_event, origin: string, permission: string) => {
+    if (typeof origin === 'string' && typeof permission === 'string' && originOf(origin)) {
+      storageService?.removeSitePermission(origin, permission)
+    }
+  })
+  handle('permissions:clear', () => storageService?.clearSitePermissions())
+
+  // --- Clear browsing data ---
+  handle(
+    'data:clear',
+    async (_event, options: { history?: boolean; cookies?: boolean; cache?: boolean; permissions?: boolean }) => {
+      const opts = options ?? {}
+      const ses = session.defaultSession
+      if (opts.history === true) storageService?.clearHistory()
+      if (opts.cookies === true) {
+        await ses.clearStorageData({
+          storages: ['cookies', 'localstorage', 'indexdb', 'serviceworkers', 'cachestorage']
+        })
+      }
+      if (opts.cache === true) {
+        await ses.clearCache()
+      }
+      if (opts.permissions === true) storageService?.clearSitePermissions()
+      return true
+    }
+  )
+}
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
   })
 }
 
 app.whenReady().then(() => {
+  if (!gotSingleInstanceLock) return
   registerIpcHandlers()
   createWindow()
 

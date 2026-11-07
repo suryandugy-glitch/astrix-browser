@@ -1,6 +1,6 @@
 import { BrowserWindow, BrowserView } from 'electron'
 import { Tab, TabState, SearchEngine } from './types'
-import { normalizeInputToUrl, generateErrorPageHtml } from './urlUtils'
+import { normalizeInputToUrl, generateErrorPageHtml, isAllowedWebContentUrl } from './urlUtils'
 import { StorageService } from './storageService'
 import { setupWebContextMenu } from './contextMenu'
 
@@ -9,6 +9,8 @@ export class TabManager {
   private storageService: StorageService
   private tabs: Map<string, { tab: Tab; view: BrowserView }> = new Map()
   private activeTabId: string = ''
+  /** Tabs currently showing the built-in error page (their URL is a data: URL internally). */
+  private errorTabs: Set<string> = new Set()
   private toolbarHeight: number = 110 // default with bookmarks bar (78px without)
 
   constructor(mainWindow: BrowserWindow, storageService: StorageService) {
@@ -53,7 +55,14 @@ export class TabManager {
     const id = `tab-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
     const prefs = this.storageService.getPreferences()
     const targetUrl = initialUrl || prefs.homepage || 'astrix://newtab'
-    const normalizedUrl = normalizeInputToUrl(targetUrl, prefs.searchEngine)
+    let normalizedUrl: string
+    try {
+      normalizedUrl = normalizeInputToUrl(targetUrl, prefs.searchEngine)
+    } catch (err) {
+      // A blocked scheme must never crash tab creation; fall back to the new tab page.
+      console.warn('Blocked tab URL, opening new tab page instead:', err)
+      normalizedUrl = 'astrix://newtab'
+    }
     const isNewTab = normalizedUrl === 'astrix://newtab'
 
     const view = new BrowserView({
@@ -79,7 +88,7 @@ export class TabManager {
     }
 
     this.setupViewListeners(id, view)
-    setupWebContextMenu(view.webContents, (url) => this.createTab(url))
+    setupWebContextMenu(view.webContents, (url) => this.openFromWebContent(url))
 
     this.tabs.set(id, { tab, view })
 
@@ -91,6 +100,15 @@ export class TabManager {
 
     this.switchTab(id)
     return tab
+  }
+
+  /** Opens a URL requested by web content (pop-ups, context menu). Only http(s) is allowed. */
+  private openFromWebContent(url: string): void {
+    if (!isAllowedWebContentUrl(url)) {
+      console.warn('Blocked web content request to open:', url)
+      return
+    }
+    this.createTab(url)
   }
 
   public duplicateTab(tabId?: string): Tab | undefined {
@@ -127,7 +145,7 @@ export class TabManager {
         entry.tab.title = title || 'Untitled'
         this.notifyStateChange()
         // Update history title if already logged
-        if (entry.tab.url && !entry.tab.url.startsWith('astrix://')) {
+        if (entry.tab.url && !this.errorTabs.has(tabId)) {
           this.storageService.addHistory(entry.tab.title, entry.tab.url, entry.tab.favicon)
         }
       }
@@ -144,6 +162,14 @@ export class TabManager {
     webContents.on('did-navigate', (_event, url) => {
       const entry = this.tabs.get(tabId)
       if (entry) {
+        if (url.startsWith('data:text/html') && this.errorTabs.has(tabId)) {
+          // Internal error page: keep showing the URL that failed.
+          entry.tab.canGoBack = webContents.canGoBack()
+          entry.tab.canGoForward = webContents.canGoForward()
+          this.notifyStateChange()
+          return
+        }
+        this.errorTabs.delete(tabId)
         entry.tab.url = url
         entry.tab.canGoBack = webContents.canGoBack()
         entry.tab.canGoForward = webContents.canGoForward()
@@ -167,10 +193,33 @@ export class TabManager {
     // Navigation failure & error recovery
     webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (isMainFrame && errorCode !== -3) {
+        this.errorTabs.add(tabId)
+        const entry = this.tabs.get(tabId)
+        if (entry && validatedURL) entry.tab.url = validatedURL
         const errorHtml = generateErrorPageHtml(validatedURL, errorDescription, errorCode)
         webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml)}`)
       }
     })
+
+    // Renderer crash: show the error page instead of leaving a blank tab.
+    webContents.on('render-process-gone', (_event, details) => {
+      const entry = this.tabs.get(tabId)
+      this.errorTabs.add(tabId)
+      const failed = entry?.tab.url ?? ''
+      const html = generateErrorPageHtml(failed, `Page crashed (${details.reason})`, -1)
+      webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    })
+
+    // Web content may only navigate to http(s). Blocks javascript:, file:, data: redirects.
+    const guardNavigation = (event: { preventDefault: () => void }, url: string): void => {
+      if (url.startsWith('data:text/html') && this.errorTabs.has(tabId)) return
+      if (!isAllowedWebContentUrl(url)) {
+        console.warn('Blocked navigation to', url)
+        event.preventDefault()
+      }
+    }
+    webContents.on('will-navigate', (event, url) => guardNavigation(event, url))
+    webContents.on('will-redirect', (event, url) => guardNavigation(event, url))
 
     // Audio status
     webContents.on('media-started-playing', () => {
@@ -201,7 +250,7 @@ export class TabManager {
 
     // Pop-up security
     webContents.setWindowOpenHandler(({ url }) => {
-      this.createTab(url)
+      this.openFromWebContent(url)
       return { action: 'deny' }
     })
   }
@@ -268,6 +317,7 @@ export class TabManager {
     }
 
     this.tabs.delete(targetId)
+    this.errorTabs.delete(targetId)
 
     if (this.activeTabId === targetId) {
       if (this.tabs.size === 0) {
@@ -296,7 +346,14 @@ export class TabManager {
     if (!entry) return
 
     const prefs = this.storageService.getPreferences()
-    const targetUrl = normalizeInputToUrl(input, prefs.searchEngine)
+    let targetUrl: string
+    try {
+      targetUrl = normalizeInputToUrl(input, prefs.searchEngine)
+    } catch (err) {
+      console.warn('Navigation blocked:', err)
+      return
+    }
+    this.errorTabs.delete(tabId)
     entry.tab.url = targetUrl
 
     if (targetUrl === 'astrix://newtab') {

@@ -112,9 +112,20 @@ export class DownloadManager {
 
   public resume(id: string): void {
     const entry = this.downloads.get(id)
-    if (entry && entry.item && entry.record.state === 'progressing') {
+    if (entry && entry.item && entry.item.canResume()) {
       entry.item.resume()
+      entry.record.state = 'progressing'
+      entry.record.isPaused = false
+      this.notifyDownloadUpdate()
     }
+  }
+
+  /** Removes finished, cancelled and failed downloads from the list. */
+  public clearFinished(): void {
+    for (const [id, entry] of this.downloads) {
+      if (entry.record.state !== 'progressing') this.downloads.delete(id)
+    }
+    this.notifyDownloadUpdate()
   }
 
   public openInFolder(id: string): void {

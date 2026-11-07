@@ -128,3 +128,29 @@ The preload script exposes the following typed API to `window.astrixAPI`:
 | `setSearchEngine(engine)` | Invoke (`tab:set-search-engine`) | Configures active search provider |
 | `getState()` | Invoke (`tab:get-state`) | Gets initial tabs array, active tab ID & engine |
 | `onTabsUpdated(cb)` | Listen (`tab:state-changed`) | Receives real-time tab list & active tab updates |
+
+
+## 6. Main-Process Modules (v0.2.0)
+
+Electron-free modules are kept separate so they can be unit tested with plain Node.
+
+| Module | Purpose | Needs Electron |
+|--------|---------|----------------|
+| `urlUtils.ts` | URL normalization, scheme blocking, error page HTML | No |
+| `validators.ts` | Sanitizing preferences, URLs, text | No |
+| `jsonStore.ts` | Atomic, versioned JSON persistence with corruption recovery | No |
+| `historyUtils.ts` | History dedupe and top sites | No |
+| `bookmarkIO.ts` | Bookmark HTML import/export | No |
+| `permissionPolicy.ts` | Per-site permission decisions | No |
+| `storageService.ts` | Bookmarks, history, preferences, site permissions on disk | Yes (`app.getPath`) |
+| `tabManager.ts` | Tabs and `BrowserView`s | Yes |
+| `downloadManager.ts` | Download tracking | Yes |
+| `index.ts` | Window, menu, permissions, IPC (sender-checked) | Yes |
+
+### Additional IPC channels
+
+`bookmarks:import`, `bookmarks:export`, `history:top-sites`, `downloads:clear-finished`, `permissions:list`, `permissions:remove`, `permissions:clear`, `data:clear` (history, cookies and site data, cache, permissions). Event channel `preferences:changed` is now exposed as `onPreferencesChanged`.
+
+### Theming
+
+`preferences.theme` (`dark`, `light`, `system`) sets `data-theme` on `<html>`; all colors are CSS variables in `main.css`. The main process also applies it to `nativeTheme` and the window background.

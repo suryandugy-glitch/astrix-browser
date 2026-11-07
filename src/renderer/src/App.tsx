@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react'
-import { Tab, TabState } from '../../main/types'
-import { Bookmark, UserPreferences } from '../../main/storageService'
-import { DownloadRecord } from '../../main/downloadManager'
-import { FindResult } from '../../preload/index.d'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
+import type { TabState } from '../../main/types'
+import type { Bookmark, UserPreferences } from '../../main/storageService'
+import type { DownloadRecord } from '../../main/downloadManager'
+import type { FindResult } from '../../preload/index.d'
 import { TabBar } from './components/TabBar'
 import { Toolbar } from './components/Toolbar'
 import { BookmarksBar } from './components/BookmarksBar'
@@ -30,6 +30,25 @@ export const App: React.FC = () => {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [downloads, setDownloads] = useState<DownloadRecord[]>([])
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES)
+
+  // Always points at the latest toggle handler, so the menu shortcut (Ctrl+D) never uses stale state.
+  const toggleBookmarkRef = useRef<() => void>(() => undefined)
+
+  // Apply the theme to <html>. "system" follows the OS setting live.
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = (): void => {
+      const effective =
+        preferences.theme === 'system' ? (media.matches ? 'dark' : 'light') : preferences.theme
+      document.documentElement.setAttribute('data-theme', effective)
+    }
+    apply()
+    if (preferences.theme === 'system') {
+      media.addEventListener('change', apply)
+      return () => media.removeEventListener('change', apply)
+    }
+    return undefined
+  }, [preferences.theme])
 
   // Modals & Panels
   const [showHistory, setShowHistory] = useState(false)
@@ -78,7 +97,11 @@ export const App: React.FC = () => {
       })
 
       const unsubBookmarkToggle = window.astrixAPI.onBookmarkToggle(() => {
-        handleToggleBookmark()
+        toggleBookmarkRef.current()
+      })
+
+      const unsubPrefs = window.astrixAPI.onPreferencesChanged((p) => {
+        setPreferences(p)
       })
 
       return () => {
@@ -88,6 +111,7 @@ export const App: React.FC = () => {
         unsubFindToggle?.()
         unsubHistoryToggle?.()
         unsubBookmarkToggle?.()
+        unsubPrefs?.()
       }
     } else {
       // Fallback preview
@@ -207,6 +231,14 @@ export const App: React.FC = () => {
     setBookmarks(updated)
   }, [activeTab, isBookmarked])
 
+  toggleBookmarkRef.current = () => {
+    void handleToggleBookmark()
+  }
+
+  const refreshBookmarks = useCallback(async () => {
+    if (window.astrixAPI) setBookmarks(await window.astrixAPI.getBookmarks())
+  }, [])
+
   const handleRemoveBookmark = async (id: string) => {
     if (window.astrixAPI) {
       await window.astrixAPI.removeBookmark(id)
@@ -316,6 +348,7 @@ export const App: React.FC = () => {
         <SettingsModal
           preferences={preferences}
           onUpdatePreferences={handleUpdatePreferences}
+          onBookmarksChanged={refreshBookmarks}
           onClose={() => setShowSettings(false)}
         />
       )}

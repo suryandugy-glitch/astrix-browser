@@ -1,6 +1,25 @@
-import { Tab, TabState, SearchEngine } from '../main/types'
-import { Bookmark, HistoryItem, UserPreferences } from '../main/storageService'
-import { DownloadRecord } from '../main/downloadManager'
+import type { Tab, TabState, SearchEngine } from '../main/types'
+import type {
+  Bookmark,
+  HistoryItem,
+  UserPreferences,
+  SitePermission
+} from '../main/storageService'
+import type { DownloadRecord } from '../main/downloadManager'
+
+export interface ClearDataOptions {
+  history?: boolean
+  cookies?: boolean
+  cache?: boolean
+  permissions?: boolean
+}
+
+export interface TopSite {
+  url: string
+  title: string
+  favicon?: string
+  visits: number
+}
 
 export interface FindResult {
   activeMatchOrdinal: number
@@ -55,6 +74,21 @@ export interface AstrixAPI {
   openDownloadFolder: (id: string) => Promise<void>
   onDownloadsUpdated: (callback: (downloads: DownloadRecord[]) => void) => () => void
 
+  clearFinishedDownloads: () => Promise<void>
+
+  // Bookmark import / export
+  importBookmarks: () => Promise<number>
+  exportBookmarks: () => Promise<boolean>
+
+  // New tab page
+  getTopSites: (limit?: number) => Promise<TopSite[]>
+
+  // Site permissions & privacy
+  listSitePermissions: () => Promise<SitePermission[]>
+  removeSitePermission: (origin: string, permission: string) => Promise<void>
+  clearSitePermissions: () => Promise<void>
+  clearBrowsingData: (options: ClearDataOptions) => Promise<boolean>
+
   // Preferences
   getPreferences: () => Promise<UserPreferences>
   updatePreferences: (partial: Partial<UserPreferences>) => Promise<UserPreferences>
@@ -62,6 +96,7 @@ export interface AstrixAPI {
   // Shortcut events from Main
   onFindToggle: (callback: () => void) => () => void
   onHistoryToggle: (callback: () => void) => () => void
+  onPreferencesChanged: (callback: (prefs: UserPreferences) => void) => () => void
   onBookmarkToggle: (callback: () => void) => () => void
 }
 

@@ -1,5 +1,5 @@
 import React from 'react'
-import { DownloadRecord } from '../../../main/downloadManager'
+import type { DownloadRecord } from '../../../main/downloadManager'
 
 interface DownloadsModalProps {
   onClose: () => void
@@ -11,7 +11,7 @@ export const DownloadsModal: React.FC<DownloadsModalProps> = ({ onClose, downloa
     if (bytes === 0) return '0 B'
     const k = 1024
     const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)))
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
   }
 
@@ -20,6 +20,20 @@ export const DownloadsModal: React.FC<DownloadsModalProps> = ({ onClose, downloa
       window.astrixAPI.openDownloadFolder(id)
     }
   }
+
+  const handlePause = (id: string) => {
+    window.astrixAPI?.pauseDownload(id)
+  }
+
+  const handleResume = (id: string) => {
+    window.astrixAPI?.resumeDownload(id)
+  }
+
+  const handleClearFinished = () => {
+    window.astrixAPI?.clearFinishedDownloads()
+  }
+
+  const hasFinished = downloads.some((d) => d.state !== 'progressing')
 
   const handleCancel = (id: string) => {
     if (window.astrixAPI) {
@@ -32,7 +46,12 @@ export const DownloadsModal: React.FC<DownloadsModalProps> = ({ onClose, downloa
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Downloads</h2>
-          <button className="modal-close-btn" onClick={onClose}>
+          {hasFinished && (
+            <button className="btn-secondary" onClick={handleClearFinished}>
+              Clear finished
+            </button>
+          )}
+          <button className="modal-close-btn" onClick={onClose} aria-label="Close downloads">
             ✕
           </button>
         </div>
@@ -51,7 +70,9 @@ export const DownloadsModal: React.FC<DownloadsModalProps> = ({ onClose, downloa
                       {formatBytes(dl.receivedBytes)}{' '}
                       {dl.totalBytes > 0 ? `/ ${formatBytes(dl.totalBytes)}` : ''}
                     </span>
-                    <span className={`download-status status-${dl.state}`}>{dl.state}</span>
+                    <span className={`download-status status-${dl.state}`}>
+                      {dl.state === 'progressing' && dl.isPaused ? 'paused' : dl.state}
+                    </span>
                   </div>
 
                   {dl.state === 'progressing' && (
@@ -69,6 +90,16 @@ export const DownloadsModal: React.FC<DownloadsModalProps> = ({ onClose, downloa
                       title="Show in folder"
                     >
                       Show in Folder
+                    </button>
+                  )}
+                  {dl.state === 'progressing' && !dl.isPaused && (
+                    <button className="btn-secondary" onClick={() => handlePause(dl.id)}>
+                      Pause
+                    </button>
+                  )}
+                  {dl.state === 'progressing' && dl.isPaused && (
+                    <button className="btn-secondary" onClick={() => handleResume(dl.id)}>
+                      Resume
                     </button>
                   )}
                   {dl.state === 'progressing' && (

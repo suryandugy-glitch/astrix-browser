@@ -1,8 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { Tab, TabState, SearchEngine } from '../main/types'
-import { Bookmark, HistoryItem, UserPreferences } from '../main/storageService'
-import { DownloadRecord } from '../main/downloadManager'
-import { FindResult } from './index.d'
+import type { Tab, TabState, SearchEngine } from '../main/types'
+import type {
+  Bookmark,
+  HistoryItem,
+  UserPreferences,
+  SitePermission
+} from '../main/storageService'
+import type { DownloadRecord } from '../main/downloadManager'
+import type { FindResult, ClearDataOptions, TopSite } from './index.d'
 
 const astrixAPI = {
   // Tabs & Navigation
@@ -79,6 +84,24 @@ const astrixAPI = {
     return () => ipcRenderer.removeListener('download:updated', handler)
   },
 
+  clearFinishedDownloads: (): Promise<void> => ipcRenderer.invoke('downloads:clear-finished'),
+
+  // Bookmark import / export
+  importBookmarks: (): Promise<number> => ipcRenderer.invoke('bookmarks:import'),
+  exportBookmarks: (): Promise<boolean> => ipcRenderer.invoke('bookmarks:export'),
+
+  // New tab page
+  getTopSites: (limit?: number): Promise<TopSite[]> =>
+    ipcRenderer.invoke('history:top-sites', limit),
+
+  // Site permissions & privacy
+  listSitePermissions: (): Promise<SitePermission[]> => ipcRenderer.invoke('permissions:list'),
+  removeSitePermission: (origin: string, permission: string): Promise<void> =>
+    ipcRenderer.invoke('permissions:remove', origin, permission),
+  clearSitePermissions: (): Promise<void> => ipcRenderer.invoke('permissions:clear'),
+  clearBrowsingData: (options: ClearDataOptions): Promise<boolean> =>
+    ipcRenderer.invoke('data:clear', options),
+
   // Preferences
   getPreferences: (): Promise<UserPreferences> => ipcRenderer.invoke('preferences:get'),
   updatePreferences: (partial: Partial<UserPreferences>): Promise<UserPreferences> =>
@@ -94,6 +117,11 @@ const astrixAPI = {
     const handler = () => callback()
     ipcRenderer.on('history:toggle', handler)
     return () => ipcRenderer.removeListener('history:toggle', handler)
+  },
+  onPreferencesChanged: (callback: (prefs: UserPreferences) => void): (() => void) => {
+    const handler = (_event: any, prefs: UserPreferences) => callback(prefs)
+    ipcRenderer.on('preferences:changed', handler)
+    return () => ipcRenderer.removeListener('preferences:changed', handler)
   },
   onBookmarkToggle: (callback: () => void): (() => void) => {
     const handler = () => callback()

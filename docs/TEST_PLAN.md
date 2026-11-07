@@ -21,7 +21,22 @@ This document details test procedures and manual verification checklists for Ast
 
 ---
 
-## 2. Unit & Integration Testing Roadmap
+## 2. Automated Tests
 
-- `tests/urlUtils.test.ts`: Covers URL validation, prefixing `https://`, search query formatting, and protocol filtering.
-- Automated Playwright/Spectron tests planned for Phase 5 (Owned by Soumik).
+Run with `npm test` (Node 22.6+; TypeScript is executed directly by Node, no build step needed). The tests import the **real** source modules, so a failing test means the shipped code is wrong.
+
+| File | Covers |
+|------|--------|
+| `tests/urlUtils.test.mjs` | URL normalization, search engines, blocked schemes (any case), localhost/IPv4 handling, web-content URL allow-list, error page escaping |
+| `tests/validators.test.mjs` | Preference sanitizing, homepage rules, storable URLs, text/favicon cleaning |
+| `tests/jsonStore.test.mjs` | Atomic save, versioning, legacy files, corrupt-file recovery, migration |
+| `tests/bookmarkIO.test.mjs` | Bookmark HTML export/import round trip, Chrome-style exports, unsafe link filtering |
+| `tests/permissionPolicy.test.mjs` | Default-deny policy, per-origin allow, always-deny list |
+| `tests/historyUtils.test.mjs` | History dedupe, ordering, size cap, top sites ranking |
+
+Code that needs Electron (tab manager, IPC, windows) is verified with the manual checklist above.
+
+## 3. Still To Do
+
+- End-to-end tests of the real app with Playwright (open tab, navigate, bookmark, download).
+- Component tests for the React UI.

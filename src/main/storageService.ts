@@ -1,7 +1,11 @@
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
-import { SearchEngine } from './types'
+import { loadJson, saveJson } from './jsonStore'
+import { DEFAULT_PREFERENCES, sanitizePreferences, isStorableUrl, cleanText, cleanFavicon } from './validators'
+import type { PreferencesShape } from './validators'
+import { parseBookmarksHtml, exportBookmarksHtml } from './bookmarkIO'
+import type { Decision } from './permissionPolicy'
+import { recordVisit, computeTopSites } from './historyUtils'
 
 export interface Bookmark {
   id: string
@@ -19,126 +23,120 @@ export interface HistoryItem {
   visitedAt: number
 }
 
-export interface UserPreferences {
-  searchEngine: SearchEngine
-  showBookmarksBar: boolean
-  homepage: string
-  theme: 'dark' | 'light' | 'system'
+export type UserPreferences = PreferencesShape
+
+export interface SitePermission {
+  origin: string
+  permission: string
+  decision: Decision
 }
 
-const DEFAULT_PREFERENCES: UserPreferences = {
-  searchEngine: 'google',
-  showBookmarksBar: true,
-  homepage: 'astrix://newtab',
-  theme: 'dark'
-}
+const SCHEMA_VERSION = 1
+
+const STARTER_BOOKMARKS = (): Bookmark[] => [
+  {
+    id: 'bm-github',
+    title: 'GitHub',
+    url: 'https://github.com',
+    favicon: 'https://github.githubassets.com/favicons/favicon.svg',
+    createdAt: Date.now()
+  },
+  {
+    id: 'bm-wiki',
+    title: 'Wikipedia',
+    url: 'https://www.wikipedia.org',
+    favicon: 'https://www.wikipedia.org/static/favicon/wikipedia.ico',
+    createdAt: Date.now()
+  },
+  {
+    id: 'bm-hn',
+    title: 'Hacker News',
+    url: 'https://news.ycombinator.com',
+    favicon: 'https://news.ycombinator.com/favicon.ico',
+    createdAt: Date.now()
+  }
+]
+
+const newId = (prefix: string): string =>
+  `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`
 
 export class StorageService {
-  private dataDir: string
   private bookmarksPath: string
   private historyPath: string
   private preferencesPath: string
+  private permissionsPath: string
 
   private bookmarks: Bookmark[] = []
   private history: HistoryItem[] = []
-  private preferences: UserPreferences = DEFAULT_PREFERENCES
+  private preferences: UserPreferences = { ...DEFAULT_PREFERENCES }
+  private permissions: Record<string, Record<string, Decision>> = {}
 
-  constructor() {
-    this.dataDir = app.getPath('userData')
-    if (!existsSync(this.dataDir)) {
-      mkdirSync(this.dataDir, { recursive: true })
-    }
-
-    this.bookmarksPath = join(this.dataDir, 'bookmarks.json')
-    this.historyPath = join(this.dataDir, 'history.json')
-    this.preferencesPath = join(this.dataDir, 'preferences.json')
-
+  constructor(dataDir: string = app.getPath('userData')) {
+    this.bookmarksPath = join(dataDir, 'bookmarks.json')
+    this.historyPath = join(dataDir, 'history.json')
+    this.preferencesPath = join(dataDir, 'preferences.json')
+    this.permissionsPath = join(dataDir, 'permissions.json')
     this.loadAll()
   }
 
-  private loadAll(): void {
-    // Load Bookmarks
+  private safeSave<T>(path: string, data: T, label: string): void {
     try {
-      if (existsSync(this.bookmarksPath)) {
-        const raw = readFileSync(this.bookmarksPath, 'utf-8')
-        this.bookmarks = JSON.parse(raw)
-      } else {
-        // Default starter bookmarks
-        this.bookmarks = [
-          {
-            id: 'bm-github',
-            title: 'GitHub',
-            url: 'https://github.com',
-            favicon: 'https://github.githubassets.com/favicons/favicon.svg',
-            createdAt: Date.now()
-          },
-          {
-            id: 'bm-wiki',
-            title: 'Wikipedia',
-            url: 'https://www.wikipedia.org',
-            favicon: 'https://www.wikipedia.org/static/favicon/wikipedia.ico',
-            createdAt: Date.now()
-          },
-          {
-            id: 'bm-hn',
-            title: 'Hacker News',
-            url: 'https://news.ycombinator.com',
-            favicon: 'https://news.ycombinator.com/favicon.ico',
-            createdAt: Date.now()
-          }
-        ]
-        this.saveBookmarks()
-      }
+      saveJson(path, data, SCHEMA_VERSION)
     } catch (e) {
-      console.error('Failed to load bookmarks:', e)
-      this.bookmarks = []
-    }
-
-    // Load History
-    try {
-      if (existsSync(this.historyPath)) {
-        const raw = readFileSync(this.historyPath, 'utf-8')
-        this.history = JSON.parse(raw)
-      }
-    } catch (e) {
-      console.error('Failed to load history:', e)
-      this.history = []
-    }
-
-    // Load Preferences
-    try {
-      if (existsSync(this.preferencesPath)) {
-        const raw = readFileSync(this.preferencesPath, 'utf-8')
-        this.preferences = { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) }
-      } else {
-        this.savePreferences()
-      }
-    } catch (e) {
-      console.error('Failed to load preferences:', e)
-      this.preferences = DEFAULT_PREFERENCES
+      console.error(`Failed to save ${label}:`, e)
     }
   }
 
-  // --- Bookmarks Methods ---
+  private loadAll(): void {
+    const bm = loadJson<unknown>(this.bookmarksPath, null, SCHEMA_VERSION)
+    if (Array.isArray(bm.data)) {
+      this.bookmarks = bm.data.filter(
+        (b): b is Bookmark => !!b && typeof b.url === 'string' && typeof b.id === 'string'
+      )
+    } else {
+      this.bookmarks = bm.existed ? [] : STARTER_BOOKMARKS()
+      if (!bm.existed) this.saveBookmarks()
+    }
+
+    const hist = loadJson<unknown>(this.historyPath, [], SCHEMA_VERSION)
+    this.history = Array.isArray(hist.data)
+      ? hist.data.filter((h): h is HistoryItem => !!h && typeof h.url === 'string')
+      : []
+
+    const prefs = loadJson<unknown>(this.preferencesPath, null, SCHEMA_VERSION)
+    this.preferences = { ...DEFAULT_PREFERENCES, ...sanitizePreferences(prefs.data) }
+    if (!prefs.existed) this.savePreferences()
+
+    const perms = loadJson<unknown>(this.permissionsPath, {}, SCHEMA_VERSION)
+    this.permissions =
+      perms.data && typeof perms.data === 'object' && !Array.isArray(perms.data)
+        ? (perms.data as Record<string, Record<string, Decision>>)
+        : {}
+  }
+
+  // --- Bookmarks ---
   public getBookmarks(): Bookmark[] {
     return [...this.bookmarks]
   }
 
-  public addBookmark(title: string, url: string, favicon?: string): Bookmark {
-    // If bookmark for this URL already exists, update it
-    const existingIndex = this.bookmarks.findIndex((b) => b.url === url)
-    if (existingIndex >= 0) {
-      this.bookmarks[existingIndex].title = title || this.bookmarks[existingIndex].title
-      if (favicon) this.bookmarks[existingIndex].favicon = favicon
+  public addBookmark(title: string, url: string, favicon?: string): Bookmark | null {
+    if (!isStorableUrl(url)) return null
+    const cleanTitle = cleanText(title)
+    const icon = cleanFavicon(favicon)
+
+    const existing = this.bookmarks.find((b) => b.url === url)
+    if (existing) {
+      existing.title = cleanTitle || existing.title
+      if (icon) existing.favicon = icon
       this.saveBookmarks()
-      return this.bookmarks[existingIndex]
+      return existing
     }
 
     const bookmark: Bookmark = {
-      id: `bm-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      title: title || url,
+      id: newId('bm'),
+      title: cleanTitle || url,
       url,
-      favicon,
+      favicon: icon,
       createdAt: Date.now()
     }
     this.bookmarks.unshift(bookmark)
@@ -147,9 +145,9 @@ export class StorageService {
   }
 
   public removeBookmark(idOrUrl: string): boolean {
-    const initialLen = this.bookmarks.length
+    const before = this.bookmarks.length
     this.bookmarks = this.bookmarks.filter((b) => b.id !== idOrUrl && b.url !== idOrUrl)
-    if (this.bookmarks.length !== initialLen) {
+    if (this.bookmarks.length !== before) {
       this.saveBookmarks()
       return true
     }
@@ -160,15 +158,32 @@ export class StorageService {
     return this.bookmarks.some((b) => b.url === url)
   }
 
-  private saveBookmarks(): void {
-    try {
-      writeFileSync(this.bookmarksPath, JSON.stringify(this.bookmarks, null, 2), 'utf-8')
-    } catch (e) {
-      console.error('Failed to save bookmarks:', e)
+  /** Returns how many new bookmarks were added. */
+  public importBookmarksHtml(html: string): number {
+    let added = 0
+    for (const item of parseBookmarksHtml(html)) {
+      if (!isStorableUrl(item.url) || this.isBookmarked(item.url)) continue
+      this.bookmarks.push({
+        id: newId('bm'),
+        title: cleanText(item.title) || item.url,
+        url: item.url,
+        createdAt: item.createdAt ?? Date.now()
+      })
+      added++
     }
+    if (added > 0) this.saveBookmarks()
+    return added
   }
 
-  // --- History Methods ---
+  public exportBookmarksHtml(): string {
+    return exportBookmarksHtml(this.bookmarks)
+  }
+
+  private saveBookmarks(): void {
+    this.safeSave(this.bookmarksPath, this.bookmarks, 'bookmarks')
+  }
+
+  // --- History ---
   public getHistory(query?: string): HistoryItem[] {
     if (!query) return [...this.history]
     const q = query.toLowerCase()
@@ -178,21 +193,13 @@ export class StorageService {
   }
 
   public addHistory(title: string, url: string, favicon?: string): void {
-    // Do not record internal or blank pages
-    if (!url || url.startsWith('astrix://') || url.startsWith('data:')) return
-
-    const item: HistoryItem = {
-      id: `hist-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      title: title || url,
-      url,
-      favicon,
-      visitedAt: Date.now()
-    }
-    this.history.unshift(item)
-    // Keep at most 2,000 history items
-    if (this.history.length > 2000) {
-      this.history = this.history.slice(0, 2000)
-    }
+    if (!isStorableUrl(url)) return
+    this.history = recordVisit(
+      this.history,
+      { title: cleanText(title), url, favicon: cleanFavicon(favicon) },
+      Date.now(),
+      () => newId('hist')
+    )
     this.saveHistory()
   }
 
@@ -206,30 +213,66 @@ export class StorageService {
     this.saveHistory()
   }
 
-  private saveHistory(): void {
-    try {
-      writeFileSync(this.historyPath, JSON.stringify(this.history, null, 2), 'utf-8')
-    } catch (e) {
-      console.error('Failed to save history:', e)
-    }
+  /** Most visited sites, used by the new tab page. */
+  public getTopSites(limit = 8): { url: string; title: string; favicon?: string; visits: number }[] {
+    return computeTopSites(this.history, limit)
   }
 
-  // --- Preferences Methods ---
+  private saveHistory(): void {
+    this.safeSave(this.historyPath, this.history, 'history')
+  }
+
+  // --- Preferences ---
   public getPreferences(): UserPreferences {
     return { ...this.preferences }
   }
 
-  public updatePreferences(partial: Partial<UserPreferences>): UserPreferences {
-    this.preferences = { ...this.preferences, ...partial }
+  public updatePreferences(partial: unknown): UserPreferences {
+    this.preferences = { ...this.preferences, ...sanitizePreferences(partial) }
     this.savePreferences()
     return { ...this.preferences }
   }
 
   private savePreferences(): void {
-    try {
-      writeFileSync(this.preferencesPath, JSON.stringify(this.preferences, null, 2), 'utf-8')
-    } catch (e) {
-      console.error('Failed to save preferences:', e)
+    this.safeSave(this.preferencesPath, this.preferences, 'preferences')
+  }
+
+  // --- Site permissions ---
+  public getPermissionStore(): Record<string, Record<string, Decision>> {
+    return this.permissions
+  }
+
+  public listSitePermissions(): SitePermission[] {
+    const out: SitePermission[] = []
+    for (const [origin, perms] of Object.entries(this.permissions)) {
+      for (const [permission, decision] of Object.entries(perms)) {
+        out.push({ origin, permission, decision })
+      }
     }
+    return out.sort((a, b) => a.origin.localeCompare(b.origin))
+  }
+
+  public setSitePermission(origin: string, permission: string, decision: Decision): void {
+    if (decision !== 'allow' && decision !== 'deny') return
+    if (!this.permissions[origin]) this.permissions[origin] = {}
+    this.permissions[origin][permission] = decision
+    this.savePermissions()
+  }
+
+  public removeSitePermission(origin: string, permission: string): void {
+    const perms = this.permissions[origin]
+    if (!perms) return
+    delete perms[permission]
+    if (Object.keys(perms).length === 0) delete this.permissions[origin]
+    this.savePermissions()
+  }
+
+  public clearSitePermissions(): void {
+    this.permissions = {}
+    this.savePermissions()
+  }
+
+  private savePermissions(): void {
+    this.safeSave(this.permissionsPath, this.permissions, 'permissions')
   }
 }

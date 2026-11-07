@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Tab } from '../../../main/types'
+import type { Tab } from '../../../main/types'
 
 interface ToolbarProps {
   activeTab?: Tab

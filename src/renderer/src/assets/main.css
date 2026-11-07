@@ -14,7 +14,42 @@
   --danger-color: #ef4444;
   --success-color: #10b981;
   --button-hover: #3b3d52;
+  --bg-surface: #222432;
+  --line-subtle: rgba(255, 255, 255, 0.04);
+  --tile-bg: rgba(255, 255, 255, 0.03);
+  --tile-border: rgba(255, 255, 255, 0.05);
+  --tile-hover: rgba(255, 255, 255, 0.08);
+  --backdrop: rgba(0, 0, 0, 0.65);
+  --newtab-from: #242638;
+  --newtab-to: #171822;
+  color-scheme: dark;
   --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Light theme. Applied by App via <html data-theme="light"> */
+:root[data-theme='light'] {
+  --bg-window: #e9ebf2;
+  --bg-toolbar: #ffffff;
+  --bg-tab-inactive: #dfe2ec;
+  --bg-tab-active: #ffffff;
+  --bg-tab-hover: #eceef5;
+  --bg-omnibox: #f1f2f7;
+  --bg-omnibox-focus: #ffffff;
+  --text-main: #1b1d2a;
+  --text-muted: #5c6275;
+  --accent-color: #4f46e5;
+  --accent-hover: #4338ca;
+  --border-color: #cfd3e0;
+  --button-hover: #e4e7f1;
+  --bg-surface: #ffffff;
+  --line-subtle: rgba(0, 0, 0, 0.06);
+  --tile-bg: rgba(0, 0, 0, 0.03);
+  --tile-border: rgba(0, 0, 0, 0.08);
+  --tile-hover: rgba(0, 0, 0, 0.07);
+  --backdrop: rgba(20, 22, 35, 0.4);
+  --newtab-from: #f7f8fc;
+  --newtab-to: #e3e6f1;
+  color-scheme: light;
 }
 
 * {
@@ -305,7 +340,7 @@ body {
   display: flex;
   align-items: center;
   padding: 0 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--line-subtle);
 }
 
 .bookmarks-list {
@@ -403,7 +438,7 @@ body {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.65);
+  background-color: var(--backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -415,7 +450,7 @@ body {
   width: 580px;
   max-width: 90vw;
   max-height: 80vh;
-  background-color: #222432;
+  background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   display: flex;
@@ -492,7 +527,7 @@ body {
   align-items: center;
   gap: 14px;
   padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--line-subtle);
 }
 
 .history-time {
@@ -544,7 +579,7 @@ body {
   align-items: center;
   gap: 14px;
   padding: 12px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--line-subtle);
 }
 
 .download-icon {
@@ -684,7 +719,7 @@ body {
   top: 84px;
   left: 90px;
   width: 320px;
-  background-color: #222432;
+  background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   padding: 16px;
@@ -719,7 +754,7 @@ body {
   display: flex;
   justify-content: space-between;
   padding: 4px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--line-subtle);
 }
 
 .site-info-key {
@@ -729,7 +764,7 @@ body {
 /* Tab Context Menu */
 .tab-context-menu {
   position: fixed;
-  background-color: #222432;
+  background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -766,9 +801,9 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   padding: 40px 20px;
-  background: radial-gradient(circle at center, #242638 0%, #171822 100%);
+  background: radial-gradient(circle at center, var(--newtab-from) 0%, var(--newtab-to) 100%);
   overflow-y: auto;
 }
 
@@ -855,8 +890,8 @@ body {
   gap: 8px;
   padding: 14px;
   border-radius: 12px;
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background-color: var(--tile-bg);
+  border: 1px solid var(--tile-border);
   cursor: pointer;
   transition: all 0.15s;
   text-decoration: none;
@@ -864,7 +899,7 @@ body {
 }
 
 .shortcut-card:hover {
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: var(--tile-hover);
   transform: translateY(-2px);
 }
 
@@ -882,4 +917,131 @@ body {
 .shortcut-label {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+
+/* ---- Settings sections ---- */
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 18px 0 8px;
+}
+
+.settings-section-title:first-child {
+  margin-top: 0;
+}
+
+.setting-row-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.setting-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-main);
+  margin: 6px 0;
+  cursor: pointer;
+}
+
+.setting-error {
+  color: var(--danger-color);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.setting-note {
+  color: var(--success-color);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.theme-options {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.theme-chip {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--tile-bg);
+  color: var(--text-main);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.theme-chip:hover {
+  background: var(--tile-hover);
+}
+
+.theme-chip.active {
+  border-color: var(--accent-color);
+  background: var(--tile-hover);
+  font-weight: 600;
+}
+
+.perm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-subtle);
+  font-size: 12px;
+}
+
+.perm-row .perm-origin {
+  word-break: break-all;
+}
+
+.perm-row .perm-name {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---- New tab: top sites ---- */
+.newtab-section-label {
+  width: 100%;
+  max-width: 580px;
+  margin: 22px auto 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.shortcut-favicon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+/* ---- Accessibility: visible keyboard focus ---- */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+.shortcut-card:focus-visible,
+.theme-chip:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
 }

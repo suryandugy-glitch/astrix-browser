@@ -1,5 +1,5 @@
 import React from 'react'
-import { Bookmark } from '../../../main/storageService'
+import type { Bookmark } from '../../../main/storageService'
 
 interface BookmarksBarProps {
   bookmarks: Bookmark[]

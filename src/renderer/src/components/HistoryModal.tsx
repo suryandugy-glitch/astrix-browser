@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { HistoryItem } from '../../../main/storageService'
+import type { HistoryItem } from '../../../main/storageService'
 
 interface HistoryModalProps {
   onClose: () => void

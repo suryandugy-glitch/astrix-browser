@@ -1,10 +1,10 @@
-import { SearchEngine } from './types'
+import type { SearchEngine } from './types'
 
 /**
  * URL normalization, validation, and search provider utilities for Astrix Browser.
  */
 
-const BLOCKED_SCHEMES = ['javascript:', 'file:', 'data:', 'vbscript:']
+const BLOCKED_SCHEMES = ['javascript:', 'file:', 'data:', 'vbscript:', 'blob:', 'filesystem:']
 
 export const SEARCH_ENGINES: Record<SearchEngine, string> = {
   google: 'https://www.google.com/search?q=',
@@ -45,8 +45,8 @@ export function normalizeInputToUrl(
     }
   }
 
-  // Check if it's localhost or an IP address
-  if (lower.startsWith('localhost') || lower.startsWith('127.0.0.1')) {
+  // Check if it's localhost or an IPv4 address (optionally with port/path)
+  if (/^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?(\/.*)?$/i.test(trimmed)) {
     return `http://${trimmed}`
   }
 
@@ -164,4 +164,17 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
+}
+
+/**
+ * Returns true when a URL requested by web content (window.open, redirects)
+ * may be opened in a tab. Web content must never open internal or local schemes.
+ */
+export function isAllowedWebContentUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
 }

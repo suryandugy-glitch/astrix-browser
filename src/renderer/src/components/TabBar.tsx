@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Tab } from '../../../main/types'
+import type { Tab } from '../../../main/types'
 
 interface TabBarProps {
   tabs: Tab[]
